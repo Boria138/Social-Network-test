@@ -128,6 +128,17 @@ function initializeDatabase() {
             )
         `);
 
+        // Sessions table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        `);
+
         console.log('Database initialized successfully');
     });
 }
@@ -478,6 +489,60 @@ const serverDB = {
     }
 };
 
+// Session operations
+const sessionDB = {
+    create: (sessionId, userId, expiresAt = null) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)';
+            db.run(sql, [sessionId, userId, expiresAt], (err) => {
+                if (err) reject(err);
+                else resolve({ id: sessionId, user_id: userId, expires_at: expiresAt });
+            });
+        });
+    },
+
+    findBySessionId: (sessionId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT * FROM sessions WHERE id = ?';
+            db.get(sql, [sessionId], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    },
+
+    deleteBySessionId: (sessionId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'DELETE FROM sessions WHERE id = ?';
+            db.run(sql, [sessionId], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    },
+
+    deleteExpired: () => {
+        return new Promise((resolve, reject) => {
+            const sql = 'DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime("now")';
+            db.run(sql, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    },
+
+    cleanup: () => {
+        // Clean up expired sessions periodically
+        setInterval(async () => {
+            try {
+                await sessionDB.deleteExpired();
+            } catch (error) {
+                console.error('Session cleanup error:', error);
+            }
+        }, 60 * 60 * 1000); // Run every hour
+    }
+};
+
 module.exports = {
     db,
     initializeDatabase,
@@ -487,5 +552,6 @@ module.exports = {
     fileDB,
     reactionDB,
     friendDB,
-    serverDB
+    serverDB,
+    sessionDB
 };

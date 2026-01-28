@@ -11,7 +11,7 @@ const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
 
-const { initializeDatabase, userDB, messageDB, dmDB, fileDB, reactionDB, friendDB, serverDB } = require('./database');
+const { initializeDatabase, userDB, messageDB, dmDB, fileDB, reactionDB, friendDB, serverDB, sessionDB } = require('./database');
 
 const app = express();
 
@@ -43,12 +43,43 @@ const io = socketIO(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// Simple token storage (in production use Redis)
-const sessions = new Map();
-
 // Generate random token
 function generateToken() {
     return crypto.randomBytes(32).toString('hex');
+}
+
+// Authenticate token from database
+async function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ error: 'Access denied' });
+    }
+
+    try {
+        const session = await sessionDB.findBySessionId(token);
+        if (!session) {
+            return res.status(403).json({ error: 'Invalid token' });
+        }
+
+        // Optionally check if session has expired
+        if (session.expires_at && new Date(session.expires_at) < new Date()) {
+            await sessionDB.deleteBySessionId(token);
+            return res.status(403).json({ error: 'Session expired' });
+        }
+
+        const user = await userDB.findById(session.user_id);
+        if (!user) {
+            return res.status(403).json({ error: 'User not found' });
+        }
+
+        req.user = { id: user.id, email: user.email };
+        next();
+    } catch (error) {
+        console.error('Authentication error:', error);
+        res.status(500).json({ error: 'Authentication failed' });
+    }
 }
 
 // Middleware
@@ -110,24 +141,9 @@ const upload = multer({
 
 // Initialize database
 initializeDatabase();
+// Start session cleanup
+sessionDB.cleanup();
 
-// Auth middleware
-function authenticateToken(req, res, next) {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
-        return res.status(401).json({ error: 'Access denied' });
-    }
-
-    const session = sessions.get(token);
-    if (!session) {
-        return res.status(403).json({ error: 'Invalid token' });
-    }
-
-    req.user = session;
-    next();
-}
 
 // API Routes
 
@@ -153,7 +169,7 @@ app.post('/api/register', async (req, res) => {
         const user = await userDB.create(username, email, hashedPassword);
 
         const token = generateToken();
-        sessions.set(token, { id: user.id, email: user.email });
+        await sessionDB.create(token, user.id);
 
         res.json({
             token,
@@ -190,7 +206,7 @@ app.post('/api/login', async (req, res) => {
         }
 
         const token = generateToken();
-        sessions.set(token, { id: user.id, email: user.email });
+        await sessionDB.create(token, user.id);
 
         res.json({
             token,
@@ -208,11 +224,17 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Logout
-app.post('/api/logout', authenticateToken, (req, res) => {
+app.post('/api/logout', authenticateToken, async (req, res) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    sessions.delete(token);
-    res.json({ success: true });
+
+    try {
+        await sessionDB.deleteBySessionId(token);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Logout error:', error);
+        res.status(500).json({ error: 'Logout failed' });
+    }
 });
 
 // Get user profile
@@ -399,20 +421,36 @@ const users = new Map();
 const rooms = new Map();
 
 // Socket.IO connection handling
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
         return next(new Error('Authentication error'));
     }
 
-    const session = sessions.get(token);
-    if (!session) {
-        return next(new Error('Authentication error'));
-    }
+    try {
+        const session = await sessionDB.findBySessionId(token);
+        if (!session) {
+            return next(new Error('Authentication error'));
+        }
 
-    socket.userId = session.id;
-    socket.userEmail = session.email;
-    next();
+        // Optionally check if session has expired
+        if (session.expires_at && new Date(session.expires_at) < new Date()) {
+            await sessionDB.deleteBySessionId(token);
+            return next(new Error('Session expired'));
+        }
+
+        const user = await userDB.findById(session.user_id);
+        if (!user) {
+            return next(new Error('User not found'));
+        }
+
+        socket.userId = user.id;
+        socket.userEmail = user.email;
+        next();
+    } catch (error) {
+        console.error('Socket authentication error:', error);
+        next(new Error('Authentication error'));
+    }
 });
 
 io.on('connection', async (socket) => {
