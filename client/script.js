@@ -892,19 +892,33 @@ async function loadChannelMessages(channelName) {
 
 function initializeMessageInput() {
     const messageInput = document.getElementById('messageInput');
-    
+
     messageInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendMessage();
         }
+
+        // Автоматическое изменение высоты при вводе текста
+        adjustTextareaHeight(messageInput);
     });
+
+    // Обработчик для изменения высоты при вводе текста
+    messageInput.addEventListener('input', (e) => {
+        adjustTextareaHeight(messageInput);
+    });
+}
+
+// Функция для автоматического изменения высоты textarea
+function adjustTextareaHeight(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 150) + 'px';
 }
 
 function sendMessage() {
     const messageInput = document.getElementById('messageInput');
     const text = messageInput.value.trim();
-    
+
     if (text === '') return;
 
     const message = {
@@ -925,8 +939,11 @@ function sendMessage() {
             });
         }
     }
-    
+
     messageInput.value = '';
+    // Сбрасываем высоту textarea после отправки
+    messageInput.style.height = 'auto';
+    adjustTextareaHeight(messageInput);
 }
 
 function addMessageToUI(message) {

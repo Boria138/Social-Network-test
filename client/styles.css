@@ -371,6 +371,9 @@ body {
     line-height: 1.375;
     color: #dcddde;
     word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
 }
 
 /* Message Input Styles */
@@ -410,7 +413,15 @@ body {
     outline: none;
     color: #dcddde;
     font-size: 16px;
+    font-family: inherit;
     padding: 11px 0;
+    resize: none;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    max-height: 150px;
+    line-height: 1.375;
+    overflow-y: auto;
 }
 
 #messageInput::placeholder {
