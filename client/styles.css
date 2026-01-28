@@ -1261,20 +1261,74 @@ body {
 }
 
 /* Emoji Picker */
-.emoji-picker {
+/* Full Emoji Picker */
+.emoji-picker-full {
     position: fixed;
     bottom: 80px;
     right: 20px;
     background-color: #2f3136;
     border-radius: 8px;
-    padding: 12px;
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    max-width: 300px;
     z-index: 1000;
     animation: slideInUp 0.2s ease;
+    width: 350px;
+    max-height: 420px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.emoji-tabs {
+    display: flex;
+    background-color: #202225;
+    padding: 8px;
+    gap: 4px;
+    border-bottom: 1px solid #40444b;
+    flex-shrink: 0;
+}
+
+.emoji-tab {
+    background: none;
+    border: none;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 18px;
+}
+
+.emoji-tab:hover {
+    background-color: #40444b;
+}
+
+.emoji-tab.active {
+    background-color: #5865f2;
+}
+
+.emoji-tab img.emoji {
+    width: 20px;
+    height: 20px;
+}
+
+.emoji-content {
+    padding: 12px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.emoji-category-title {
+    color: #8e9297;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    padding-left: 4px;
+}
+
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
 }
 
 @keyframes slideInUp {
@@ -1291,15 +1345,40 @@ body {
 .emoji-option {
     background: none;
     border: none;
-    font-size: 24px;
+    font-size: 22px;
+    font-family: "Noto Color Emoji", sans-serif;
     cursor: pointer;
-    padding: 8px;
+    padding: 6px;
     border-radius: 4px;
     transition: background-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .emoji-option:hover {
     background-color: #40444b;
+}
+
+.emoji-option img.emoji {
+    width: 22px;
+    height: 22px;
+}
+
+img.emoji {
+    height: 1.2em;
+    width: 1.2em;
+    vertical-align: -0.2em;
+}
+
+.reaction img.emoji {
+    height: 16px;
+    width: 16px;
+}
+
+.message-text img.emoji {
+    height: 1.4em;
+    width: 1.4em;
 }
 
 /* Speaking Indicator */
