@@ -104,12 +104,12 @@ function connectToSocketIO() {
                 channels[channelName] = [];
             }
             channels[channelName].push(data.message);
-            
+
             if (channelName === currentChannel && currentView === 'server') {
                 addMessageToUI(data.message);
                 scrollToBottom();
             }
-            
+
             if (document.hidden) {
                 showNotification('New Message', `${data.message.author}: ${data.message.text}`);
             }
@@ -183,7 +183,8 @@ function connectToSocketIO() {
                     author: data.message.author,
                     avatar: data.message.avatar,
                     text: data.message.text,
-                    timestamp: data.message.timestamp
+                    timestamp: data.message.timestamp,
+                    reactions: data.message.reactions || []
                 });
                 scrollToBottom();
             }
@@ -196,7 +197,8 @@ function connectToSocketIO() {
                     author: currentUser.username,
                     avatar: currentUser.avatar,
                     text: data.message.text,
-                    timestamp: data.message.timestamp
+                    timestamp: data.message.timestamp,
+                    reactions: data.message.reactions || []
                 });
                 scrollToBottom();
             }
@@ -874,7 +876,8 @@ async function loadChannelMessages(channelName) {
                     author: message.username,
                     avatar: message.avatar || message.username.charAt(0).toUpperCase(),
                     text: message.content,
-                    timestamp: message.created_at
+                    timestamp: message.created_at,
+                    reactions: message.reactions || []
                 });
             });
         } else {
@@ -928,42 +931,58 @@ function sendMessage() {
 
 function addMessageToUI(message) {
     const messagesContainer = document.getElementById('messagesContainer');
-    
+
     const messageGroup = document.createElement('div');
     messageGroup.className = 'message-group';
     messageGroup.setAttribute('data-message-id', message.id || Date.now());
-    
+
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
     avatar.textContent = message.avatar;
-    
+
     const content = document.createElement('div');
     content.className = 'message-content';
-    
+
     const header = document.createElement('div');
     header.className = 'message-header';
-    
+
     const author = document.createElement('span');
     author.className = 'message-author';
     author.textContent = message.author;
-    
+
     const timestamp = document.createElement('span');
     timestamp.className = 'message-timestamp';
     timestamp.textContent = formatTimestamp(message.timestamp);
-    
+
     const text = document.createElement('div');
     text.className = 'message-text';
     text.textContent = message.text;
-    
+
     const reactionsContainer = document.createElement('div');
     reactionsContainer.className = 'message-reactions';
-    
+
+    // Add existing reactions to the message
+    if (message.reactions && message.reactions.length > 0) {
+        message.reactions.forEach(reaction => {
+            const reactionEl = document.createElement('div');
+            reactionEl.className = 'reaction';
+            reactionEl.innerHTML = `${reaction.emoji} <span>${reaction.count}</span>`;
+            reactionEl.title = reaction.users;
+            reactionEl.addEventListener('click', () => {
+                if (socket && socket.connected) {
+                    socket.emit('remove-reaction', { messageId: message.id, emoji: reaction.emoji });
+                }
+            });
+            reactionsContainer.appendChild(reactionEl);
+        });
+    }
+
     const addReactionBtn = document.createElement('button');
     addReactionBtn.className = 'add-reaction-btn';
     addReactionBtn.textContent = '😊';
     addReactionBtn.title = 'Add reaction';
     addReactionBtn.onclick = () => showEmojiPickerForMessage(message.id || Date.now());
-    
+
     header.appendChild(author);
     header.appendChild(timestamp);
     content.appendChild(header);
@@ -1648,7 +1667,8 @@ async function loadDMHistory(userId) {
                    author: message.username,
                    avatar: message.avatar || message.username.charAt(0).toUpperCase(),
                    text: message.content,
-                   timestamp: message.created_at
+                   timestamp: message.created_at,
+                   reactions: message.reactions || []
                });
            });
        } else {

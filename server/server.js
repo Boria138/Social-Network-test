@@ -291,7 +291,17 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
 app.get('/api/messages/:channelId', authenticateToken, async (req, res) => {
     try {
         const messages = await messageDB.getByChannel(req.params.channelId);
-        res.json(messages);
+
+        // For each message, get its reactions
+        const messagesWithReactions = await Promise.all(messages.map(async (message) => {
+            const reactions = await reactionDB.getByMessage(message.id);
+            return {
+                ...message,
+                reactions: reactions
+            };
+        }));
+
+        res.json(messagesWithReactions);
     } catch (error) {
         res.status(500).json({ error: 'Failed to get messages' });
     }
@@ -301,7 +311,17 @@ app.get('/api/messages/:channelId', authenticateToken, async (req, res) => {
 app.get('/api/dm/:userId', authenticateToken, async (req, res) => {
     try {
         const messages = await dmDB.getConversation(req.user.id, req.params.userId);
-        res.json(messages);
+
+        // For each message, get its reactions
+        const messagesWithReactions = await Promise.all(messages.map(async (message) => {
+            const reactions = await reactionDB.getByMessage(message.id);
+            return {
+                ...message,
+                reactions: reactions
+            };
+        }));
+
+        res.json(messagesWithReactions);
     } catch (error) {
         res.status(500).json({ error: 'Failed to get messages' });
     }
@@ -482,12 +502,16 @@ io.on('connection', async (socket) => {
                 channelId
             );
 
+            // Get reactions for the new message
+            const reactions = await reactionDB.getByMessage(savedMessage.id);
+
             const broadcastMessage = {
                 id: savedMessage.id,
                 author: user.username,
                 avatar: user.avatar || user.username.charAt(0).toUpperCase(),
                 text: message.text,
-                timestamp: new Date()
+                timestamp: new Date(),
+                reactions: reactions
             };
 
             io.emit('new-message', {
@@ -510,12 +534,16 @@ io.on('connection', async (socket) => {
                 receiverId
             );
 
+            // Get reactions for the new message
+            const reactions = await reactionDB.getByMessage(savedMessage.id);
+
             const messagePayload = {
                 id: savedMessage.id,
                 author: sender.username,
                 avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
                 text: message.text,
-                timestamp: new Date()
+                timestamp: new Date(),
+                reactions: reactions
             };
 
             const receiverSocket = Array.from(users.values())
