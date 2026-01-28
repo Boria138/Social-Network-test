@@ -1,0 +1,31 @@
+{
+  "name": "discord-clone",
+  "version": "1.0.0",
+  "description": "Discord Clone - Real-time chat with voice/video calls (PWA)",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "start": "cd server && npm start",
+    "start:server": "cd server && npm start",
+    "build:client": "cd client && npm run build",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": [
+    "discord",
+    "chat",
+    "pwa",
+    "webrtc",
+    "socket.io"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
