@@ -34,20 +34,17 @@ discord-clone/
 └── README.md
 ```
 
-## Локальная разработка
+## Сборка и запуск проекта
 
 ```bash
-# Терминал 1 - сервер
-cd server
-npm install
-npm run dev
+# Собрать проект (установить зависимости и собрать клиент)
+npm run build:all
 
-# Терминал 2 - клиент
-cd client
-npm install
-npm run dev
+# Или только клиентскую часть
+npm run build
 
-# Открыть http://localhost:5173
+# Полная сборка и запуск production версии
+npm run serve
 ```
 
 ## Деплой на VPS
