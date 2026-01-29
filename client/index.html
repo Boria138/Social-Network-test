@@ -16,6 +16,10 @@
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
+
+    <!-- Mobile Drawer Overlay -->
+    <div class="drawer-overlay" id="drawerOverlay"></div>
+
     <!-- Server List (Left Sidebar) -->
     <div class="server-list">
         <div class="server-icon home active" id="friendsBtn" title="Friends">
@@ -72,6 +76,7 @@
                         <span>random</span>
                     </div>
                 </div>
+
                 <div class="channel-category">
                     <div class="category-header">
                         <svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M9.3 5.3L15 11l-5.7 5.7c-.4.4-.4 1 0 1.4.4.4 1 .4 1.4 0l6.4-6.4c.4-.4.4-1 0-1.4L10.7 3.9c-.4-.4-1-.4-1.4 0-.4.4-.4 1 0 1.4z"/></svg>
@@ -88,7 +93,7 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="user-panel">
             <div class="user-info">
                 <div class="user-avatar">U</div>
@@ -117,24 +122,47 @@
 
     <!-- Main Content Area -->
     <div class="main-content">
+
         <!-- Server/Channel Chat View -->
         <div id="chatView" class="chat-view" style="display: none;">
             <div class="chat-header">
                 <div class="channel-info" id="chatHeaderInfo">
                     <!-- Header will be dynamically populated -->
                 </div>
+
                 <div class="chat-controls">
+                    <!-- Mobile drawer button -->
+                    <button class="icon-btn mobile-menu-btn" id="mobileMenuBtn" title="Menu">
+                        <svg width="24" height="24" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"/>
+                        </svg>
+                    </button>
+
                     <button class="icon-btn" id="membersBtn" title="Members" style="display: none;">
-                        <svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M14 8.00598C14 10.211 12.206 12.006 10 12.006C7.795 12.006 6 10.211 6 8.00598C6 5.80098 7.795 4.00598 10 4.00598C12.206 4.00598 14 5.80098 14 8.00598ZM2 19.006C2 15.473 5.29 13.006 10 13.006C14.711 13.006 18 15.473 18 19.006V20.006H2V19.006Z"/></svg>
+                        <svg width="24" height="24" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M14 8.00598C14 10.211 12.206 12.006 10 12.006C7.795 12.006 6 10.211 6 8.00598C6 5.80098 7.795 4.00598 10 4.00598C12.206 4.00598 14 5.80098 14 8.00598ZM2 19.006C2 15.473 5.29 13.006 10 13.006C14.711 13.006 18 15.473 18 19.006V20.006H2V19.006Z"/>
+                        </svg>
                     </button>
                 </div>
             </div>
+
             <div class="messages" id="messagesContainer"></div>
+
             <div class="message-input-container">
                 <div class="message-input-wrapper">
-                    <button class="attach-btn"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C11.5 2 11 2.19 10.59 2.59L2.59 10.59C1.8 11.37 1.8 12.63 2.59 13.41C3.37 14.2 4.63 14.2 5.41 13.41L11 7.83V16C11 16.55 11.45 17 12 17C12.55 17 13 16.55 13 16V7.83L18.59 13.41C19.37 14.2 20.63 14.2 21.41 13.41C22.2 12.63 22.2 11.37 21.41 10.59L13.41 2.59C13 2.19 12.5 2 12 2Z"/></svg></button>
+                    <button class="attach-btn">
+                        <svg width="24" height="24" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M12 2C11.5 2 11 2.19 10.59 2.59L2.59 10.59C1.8 11.37 1.8 12.63 2.59 13.41C3.37 14.2 4.63 14.2 5.41 13.41L11 7.83V16C11 16.55 11.45 17 12 17C12.55 17 13 16.55 13 16V7.83L18.59 13.41C19.37 14.2 20.63 14.2 21.41 13.41C22.2 12.63 22.2 11.37 21.41 10.59L13.41 2.59C13 2.19 12.5 2 12 2Z"/>
+                        </svg>
+                    </button>
+
                     <textarea id="messageInput" placeholder="Message..." rows="1"></textarea>
-                    <div class="emoji-btn"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.486 2 2 6.486 2 12C2 17.514 6.486 22 12 22C17.514 22 22 17.514 22 12C22 6.486 17.514 2 12 2ZM15.5 8C16.328 8 17 8.672 17 9.5C17 10.328 16.328 11 15.5 11C14.672 11 14 10.328 14 9.5C14 8.672 14.672 8 15.5 8ZM8.5 8C9.328 8 10 8.672 10 9.5C10 10.328 9.328 11 8.5 11C7.672 11 7 10.328 7 9.5C7 8.672 7.672 8 8.5 8ZM12 17.5C9.656 17.5 7.586 16.019 6.673 13.852C6.594 13.643 6.673 13.407 6.852 13.266C7.031 13.125 7.281 13.117 7.469 13.242C8.766 14.109 10.352 14.5 12 14.5C13.648 14.5 15.234 14.109 16.531 13.242C16.719 13.117 16.969 13.125 17.148 13.266C17.327 13.407 17.406 13.643 17.327 13.852C16.414 16.019 14.344 17.5 12 17.5Z"/></svg></div>
+
+                    <div class="emoji-btn">
+                        <svg width="24" height="24" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M12 2C6.486 2 2 6.486 2 12C2 17.514 6.486 22 12 22C17.514 22 22 17.514 22 12C22 6.486 17.514 2 12 2ZM15.5 8C16.328 8 17 8.672 17 9.5C17 10.328 16.328 11 15.5 11C14.672 11 14 10.328 14 9.5C14 8.672 14.672 8 15.5 8ZM8.5 8C9.328 8 10 8.672 10 9.5C10 10.328 9.328 11 8.5 11C7.672 11 7 10.328 7 9.5C7 8.672 7.672 8 8.5 8ZM12 17.5C9.656 17.5 7.586 16.019 6.673 13.852C6.594 13.643 6.673 13.407 6.852 13.266C7.031 13.125 7.281 13.117 7.469 13.242C8.766 14.109 10.352 14.5 12 14.5C13.648 14.5 15.234 14.109 16.531 13.242C16.719 13.117 16.969 13.125 17.148 13.266C17.327 13.407 17.406 13.643 17.327 13.852C16.414 16.019 14.344 17.5 12 17.5Z"/>
+                        </svg>
+                    </div>
                 </div>
             </div>
         </div>

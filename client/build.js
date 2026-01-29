@@ -7,7 +7,7 @@ const dist = path.join(__dirname, 'dist');
 if (fs.existsSync(dist)) {
     fs.rmSync(dist, { recursive: true });
 }
-fs.mkdirSync(dist);
+fs.mkdirSync(dist, { recursive: true });
 
 // Files to copy
 const files = [
@@ -28,18 +28,43 @@ files.forEach(file => {
     if (fs.existsSync(src)) {
         fs.copyFileSync(src, path.join(dist, file));
         console.log(`Copied: ${file}`);
+    } else {
+        console.warn(`Missing: ${file}`);
     }
 });
 
-// Copy icons folder
-const iconsDir = path.join(__dirname, 'icons');
-if (fs.existsSync(iconsDir)) {
-    const distIcons = path.join(dist, 'icons');
-    fs.mkdirSync(distIcons, { recursive: true });
-    fs.readdirSync(iconsDir).forEach(file => {
-        fs.copyFileSync(path.join(iconsDir, file), path.join(distIcons, file));
+// Helper: copy folder recursively
+function copyDir(srcDir, destDir, label) {
+    if (!fs.existsSync(srcDir)) return;
+
+    fs.mkdirSync(destDir, { recursive: true });
+
+    fs.readdirSync(srcDir, { withFileTypes: true }).forEach(entry => {
+        const srcPath = path.join(srcDir, entry.name);
+        const destPath = path.join(destDir, entry.name);
+
+        if (entry.isDirectory()) {
+            copyDir(srcPath, destPath);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+        }
     });
-    console.log('Copied: icons/');
+
+    console.log(`Copied: ${label || path.basename(srcDir) + '/'}`);
 }
+
+// Copy icons folder
+copyDir(
+    path.join(__dirname, 'icons'),
+    path.join(dist, 'icons'),
+    'icons/'
+);
+
+// ✅ Copy assets folder (Voxii logo lives here)
+copyDir(
+    path.join(__dirname, 'assets'),
+    path.join(dist, 'assets'),
+    'assets/'
+);
 
 console.log('Build complete!');

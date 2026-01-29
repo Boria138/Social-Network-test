@@ -2216,3 +2216,55 @@ function makeInterfaceResizable(callInterface) {
         isResizing = false;
     });
 }
+
+
+
+// =======================================================
+// Mobile drawer: open/close channel list
+// =======================================================
+(() => {
+  const panel = document.getElementById("channelList");
+  const overlay = document.getElementById("drawerOverlay");
+  const btn = document.getElementById("mobileMenuBtn");
+
+  if (!panel || !overlay || !btn) return;
+
+  const isMobile = () => window.matchMedia("(max-width: 820px)").matches;
+
+  const openDrawer = () => {
+    if (!isMobile()) return;
+    panel.classList.add("is-open");
+    overlay.classList.add("is-open");
+  };
+
+  const closeDrawer = () => {
+    panel.classList.remove("is-open");
+    overlay.classList.remove("is-open");
+  };
+
+  btn.addEventListener("click", () => {
+    const opened = panel.classList.contains("is-open");
+    if (opened) closeDrawer();
+    else openDrawer();
+  });
+
+  overlay.addEventListener("click", closeDrawer);
+
+  // Close drawer when user selects a channel/DM item
+  panel.addEventListener("click", (e) => {
+    const target = e.target;
+    if (!target) return;
+    const channelEl = target.closest(".channel");
+    if (channelEl && isMobile()) closeDrawer();
+  });
+
+  // Close on ESC
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDrawer();
+  });
+
+  // Auto-close when leaving mobile size
+  window.addEventListener("resize", () => {
+    if (!isMobile()) closeDrawer();
+  });
+})();
