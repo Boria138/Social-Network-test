@@ -32,31 +32,6 @@ function initializeDatabase() {
             )
         `);
 
-        // Channels table
-        db.run(`
-            CREATE TABLE IF NOT EXISTS channels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL,
-                server_id INTEGER,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (server_id) REFERENCES servers(id)
-            )
-        `);
-
-        // Messages table
-        db.run(`
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT NOT NULL,
-                user_id INTEGER,
-                channel_id INTEGER,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id),
-                FOREIGN KEY (channel_id) REFERENCES channels(id)
-            )
-        `);
-
         // Direct messages table
         db.run(`
             CREATE TABLE IF NOT EXISTS direct_messages (
@@ -80,10 +55,10 @@ function initializeDatabase() {
                 filetype TEXT,
                 filesize INTEGER,
                 user_id INTEGER,
-                channel_id INTEGER,
+                dm_id INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id),
-                FOREIGN KEY (channel_id) REFERENCES channels(id)
+                FOREIGN KEY (dm_id) REFERENCES direct_messages(id)
             )
         `);
 
@@ -196,35 +171,6 @@ const userDB = {
     }
 };
 
-// Message operations
-const messageDB = {
-    create: (content, userId, channelId) => {
-        return new Promise((resolve, reject) => {
-            const sql = 'INSERT INTO messages (content, user_id, channel_id) VALUES (?, ?, ?)';
-            db.run(sql, [content, userId, channelId], function(err) {
-                if (err) reject(err);
-                else resolve({ id: this.lastID, content, userId, channelId });
-            });
-        });
-    },
-
-    getByChannel: (channelId, limit = 50) => {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                SELECT m.*, u.username, u.avatar 
-                FROM messages m 
-                JOIN users u ON m.user_id = u.id 
-                WHERE m.channel_id = ? 
-                ORDER BY m.created_at DESC 
-                LIMIT ?
-            `;
-            db.all(sql, [channelId, limit], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows.reverse());
-            });
-        });
-    }
-};
 
 // Direct message operations
 const dmDB = {
@@ -269,26 +215,26 @@ const dmDB = {
 
 // File operations
 const fileDB = {
-    create: (filename, filepath, filetype, filesize, userId, channelId) => {
+    create: (filename, filepath, filetype, filesize, userId, dmId) => {
         return new Promise((resolve, reject) => {
-            const sql = 'INSERT INTO file_uploads (filename, filepath, filetype, filesize, user_id, channel_id) VALUES (?, ?, ?, ?, ?, ?)';
-            db.run(sql, [filename, filepath, filetype, filesize, userId, channelId], function(err) {
+            const sql = 'INSERT INTO file_uploads (filename, filepath, filetype, filesize, user_id, dm_id) VALUES (?, ?, ?, ?, ?, ?)';
+            db.run(sql, [filename, filepath, filetype, filesize, userId, dmId], function(err) {
                 if (err) reject(err);
                 else resolve({ id: this.lastID, filename, filepath });
             });
         });
     },
 
-    getByChannel: (channelId) => {
+    getByDM: (dmId) => {
         return new Promise((resolve, reject) => {
             const sql = `
-                SELECT f.*, u.username 
-                FROM file_uploads f 
-                JOIN users u ON f.user_id = u.id 
-                WHERE f.channel_id = ? 
+                SELECT f.*, u.username
+                FROM file_uploads f
+                JOIN users u ON f.user_id = u.id
+                WHERE f.dm_id = ?
                 ORDER BY f.created_at DESC
             `;
-            db.all(sql, [channelId], (err, rows) => {
+            db.all(sql, [dmId], (err, rows) => {
                 if (err) reject(err);
                 else resolve(rows);
             });
@@ -547,7 +493,6 @@ module.exports = {
     db,
     initializeDatabase,
     userDB,
-    messageDB,
     dmDB,
     fileDB,
     reactionDB,

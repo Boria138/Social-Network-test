@@ -146,7 +146,7 @@ body::after{
 }
 
 /* =======================================================
-   Server List
+   DM List
    ======================================================= */
 .server-list {
     width: 78px;
@@ -194,15 +194,8 @@ body::after{
     color: #fff;
 }
 
-.server-separator {
-    width: 32px;
-    height: 2px;
-    background: rgba(255,255,255,.10);
-    border-radius: 999px;
-}
-
 /* =======================================================
-   Channel List
+   DM List
    ======================================================= */
 .channel-list {
     width: 260px;
@@ -236,48 +229,6 @@ body::after{
     color: var(--text);
 }
 
-.server-dropdown {
-    font-size: 18px;
-    color: var(--muted);
-}
-
-.channels-view {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.channels-container {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
-}
-
-.channel-category {
-    margin-bottom: 16px;
-}
-
-.category-header {
-    display: flex;
-    align-items: center;
-    padding: 8px 8px 4px 8px;
-    cursor: pointer;
-    user-select: none;
-}
-
-.category-header svg {
-    margin-right: 6px;
-    color: var(--muted-2);
-}
-
-.category-header span {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--muted-2);
-    letter-spacing: 0.6px;
-}
-
 .channel {
     display: flex;
     align-items: center;
@@ -285,7 +236,6 @@ body::after{
     margin: 3px 0;
     border-radius: 10px;
     cursor: pointer;
-
     transition: background-color 0.15s, color 0.15s, transform .14s ease, box-shadow .14s ease;
     color: var(--muted);
 }
@@ -309,13 +259,33 @@ body::after{
 }
 
 .channel.active svg,
-.channel:hover svg{
+.channel:hover svg {
     color: rgba(255,255,255,.80);
 }
 
 .channel span {
     font-size: 16px;
     font-weight: 500;
+}
+
+.category-header {
+    display: flex;
+    align-items: center;
+    padding: 8px 8px 4px 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.category-header svg {
+    margin-right: 6px;
+    color: var(--muted-2);
+}
+
+.category-header span {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted-2);
+    letter-spacing: 0.6px;
 }
 
 /* =======================================================
@@ -1085,14 +1055,6 @@ body::after{
 /* =======================================================
    Voice Channel Indicator
    ======================================================= */
-.voice-channel.in-call {
-    background: linear-gradient(135deg, rgba(34,197,94,.85), rgba(16,185,129,.65));
-    color: #fff;
-}
-
-.voice-channel.in-call:hover {
-    filter: brightness(.95);
-}
 
 /* =======================================================
    Friends / DM
@@ -1796,7 +1758,6 @@ img.emoji {
     .channel-list{
         display: flex;
     }
-    .channels-view,
     .dm-list-view{
         min-height: 0;
     }
@@ -1906,7 +1867,6 @@ img.emoji {
     }
 
     /* Better touch scrolling */
-    .channels-container,
     .dm-list-view,
     .messages,
     .friends-content-wrapper,

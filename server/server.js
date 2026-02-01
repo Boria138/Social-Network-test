@@ -11,7 +11,7 @@ const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
 
-const { initializeDatabase, userDB, messageDB, dmDB, fileDB, reactionDB, friendDB, serverDB, sessionDB } = require('./database');
+const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, sessionDB } = require('./database');
 
 const app = express();
 
@@ -264,14 +264,14 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
             return res.status(400).json({ error: 'No file uploaded' });
         }
 
-        const { channelId } = req.body;
+        const { dmId } = req.body;
         const fileRecord = await fileDB.create(
             req.file.filename,
             req.file.path,
             req.file.mimetype,
             req.file.size,
             req.user.id,
-            channelId
+            dmId
         );
 
         res.json({
@@ -287,25 +287,6 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
     }
 });
 
-// Get messages by channel
-app.get('/api/messages/:channelId', authenticateToken, async (req, res) => {
-    try {
-        const messages = await messageDB.getByChannel(req.params.channelId);
-
-        // For each message, get its reactions
-        const messagesWithReactions = await Promise.all(messages.map(async (message) => {
-            const reactions = await reactionDB.getByMessage(message.id);
-            return {
-                ...message,
-                reactions: reactions
-            };
-        }));
-
-        res.json(messagesWithReactions);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to get messages' });
-    }
-});
 
 // Get direct messages
 app.get('/api/dm/:userId', authenticateToken, async (req, res) => {
@@ -491,37 +472,6 @@ io.on('connection', async (socket) => {
         console.error('Error loading user:', error);
     }
 
-    socket.on('send-message', async (messageData) => {
-        try {
-            const { channelId, message } = messageData;
-            const user = await userDB.findById(socket.userId);
-
-            const savedMessage = await messageDB.create(
-                message.text,
-                socket.userId,
-                channelId
-            );
-
-            // Get reactions for the new message
-            const reactions = await reactionDB.getByMessage(savedMessage.id);
-
-            const broadcastMessage = {
-                id: savedMessage.id,
-                author: user.username,
-                avatar: user.avatar || user.username.charAt(0).toUpperCase(),
-                text: message.text,
-                timestamp: new Date(),
-                reactions: reactions
-            };
-
-            io.emit('new-message', {
-                channelId,
-                message: broadcastMessage
-            });
-        } catch (error) {
-            console.error('Message error:', error);
-        }
-    });
 
     socket.on('send-dm', async (data) => {
         try {
