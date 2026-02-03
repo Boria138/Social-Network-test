@@ -288,6 +288,10 @@ body::after{
     letter-spacing: 0.6px;
 }
 
+.self-chat-icon {
+    background: linear-gradient(135deg, rgba(255,215,0,.95), rgba(255,140,0,.85)) !important; /* Золотистый цвет для Self Chat */
+}
+
 /* =======================================================
    User Panel
    ======================================================= */

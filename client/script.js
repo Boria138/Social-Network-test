@@ -665,6 +665,76 @@ window.startDM = async function(friendId, friendUsername) {
     await loadDMHistory(friendId);
 };
 
+// Функция для открытия чата с самим собой
+function startSelfChat() {
+    currentView = 'dm';
+    currentDMUserId = currentUser.id; // Используем ID текущего пользователя
+
+    const friendsView = document.getElementById('friendsView');
+    const chatView = document.getElementById('chatView');
+    const dmListView = document.getElementById('dmListView');
+
+    if (friendsView) friendsView.style.display = 'none';
+    if (chatView) chatView.style.display = 'flex';
+    if (dmListView) dmListView.style.display = 'block';
+
+    const chatHeaderInfo = document.getElementById('chatHeaderInfo');
+    if (chatHeaderInfo) {
+        chatHeaderInfo.innerHTML = `
+            <div class="friend-avatar">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+            <span class="channel-name">Self Chat</span>
+        `;
+    }
+
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.placeholder = `Message yourself...`;
+    }
+
+    // Загружаем историю сообщений для Self Chat
+    loadSelfChatHistory();
+}
+
+// Функция для загрузки истории Self Chat из localStorage
+function loadSelfChatHistory() {
+    const messagesContainer = document.getElementById('messagesContainer');
+
+    if (!messagesContainer) {
+        console.error('Messages container element not found');
+        return;
+    }
+
+    messagesContainer.innerHTML = '';
+
+    // Получаем историю из localStorage
+    const selfChatHistory = JSON.parse(localStorage.getItem(`selfChatHistory_${currentUser.id}`)) || [];
+
+    selfChatHistory.forEach(message => {
+        addMessageToUI({
+            id: message.id,
+            author: message.author,
+            avatar: message.avatar,
+            text: message.text,
+            timestamp: message.timestamp,
+            reactions: message.reactions || []
+        });
+    });
+
+    scrollToBottom();
+}
+
+// Функция для сохранения сообщения в истории Self Chat
+function saveSelfMessageToHistory(message) {
+    const key = `selfChatHistory_${currentUser.id}`;
+    const history = JSON.parse(localStorage.getItem(key)) || [];
+
+    // Добавляем новое сообщение
+    history.push(message);
+
+    // Сохраняем обратно в localStorage
+    localStorage.setItem(key, JSON.stringify(history));
+}
+
 // Show friends view
 function showFriendsView() {
     currentView = 'friends';
@@ -731,17 +801,30 @@ function sendMessage() {
 
     const text = messageInput.value.trim();
 
-    if (text === '' || !currentDMUserId) return;
+    if (text === '') return;
 
     const message = {
+        id: Date.now(), // используем временную метку как ID
         text: text,
+        author: currentUser.username,
+        avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
+        timestamp: new Date(),
+        reactions: []
     };
 
-    if (socket && socket.connected) {
-        socket.emit('send-dm', {
-            receiverId: currentDMUserId,
-            message: message
-        });
+    // Если это Self Chat, сохраняем сообщение локально
+    if (currentDMUserId === currentUser.id) {
+        addMessageToUI(message);
+        saveSelfMessageToHistory(message);
+        scrollToBottom();
+    } else if (currentDMUserId) {
+        // Для обычных DM отправляем через сокет
+        if (socket && socket.connected) {
+            socket.emit('send-dm', {
+                receiverId: currentDMUserId,
+                message: message
+            });
+        }
     }
 
     messageInput.value = '';
@@ -794,11 +877,21 @@ function addMessageToUI(message) {
             reactionEl.className = 'reaction';
             reactionEl.innerHTML = `${reaction.emoji} <span>${reaction.count}</span>`;
             reactionEl.title = reaction.users;
-            reactionEl.addEventListener('click', () => {
-                if (socket && socket.connected) {
-                    socket.emit('remove-reaction', { messageId: message.id, emoji: reaction.emoji });
-                }
-            });
+
+            // Для Self Chat обработка реакций будет отличаться
+            if (currentDMUserId === currentUser.id) {
+                // В Self Chat просто удаляем реакцию при клике
+                reactionEl.addEventListener('click', () => {
+                    removeSelfChatReaction(message.id, reaction.emoji);
+                });
+            } else {
+                // Для обычных DM отправляем через сокет
+                reactionEl.addEventListener('click', () => {
+                    if (socket && socket.connected) {
+                        socket.emit('remove-reaction', { messageId: message.id, emoji: reaction.emoji });
+                    }
+                });
+            }
             reactionsContainer.appendChild(reactionEl);
         });
     }
@@ -1002,7 +1095,10 @@ function createFullEmojiPicker(onSelect) {
 }
 
 function addReaction(messageId, emoji) {
-    if (socket && socket.connected) {
+    // Если это Self Chat, обрабатываем локально
+    if (currentDMUserId === currentUser.id) {
+        addSelfChatReaction(messageId, emoji);
+    } else if (socket && socket.connected) {
         socket.emit('add-reaction', { messageId, emoji });
     }
 }
@@ -1018,16 +1114,98 @@ function updateMessageReactions(messageId, reactions) {
         reactionEl.className = 'reaction';
         reactionEl.innerHTML = `${reaction.emoji} <span>${reaction.count}</span>`;
         reactionEl.title = reaction.users;
-        reactionEl.addEventListener('click', () => {
-            if (socket && socket.connected) {
-                socket.emit('remove-reaction', { messageId, emoji: reaction.emoji });
-            }
-        });
+
+        // Для Self Chat обработка реакций будет отличаться
+        if (currentDMUserId === currentUser.id) {
+            // В Self Chat просто удаляем реакцию при клике
+            reactionEl.addEventListener('click', () => {
+                removeSelfChatReaction(messageId, reaction.emoji);
+            });
+        } else {
+            // Для обычных DM отправляем через сокет
+            reactionEl.addEventListener('click', () => {
+                if (socket && socket.connected) {
+                    socket.emit('remove-reaction', { messageId, emoji: reaction.emoji });
+                }
+            });
+        }
         reactionsContainer.appendChild(reactionEl);
     });
 
     if (typeof twemoji !== 'undefined') {
         twemoji.parse(reactionsContainer);
+    }
+}
+
+// Функция для добавления реакции в Self Chat
+function addSelfChatReaction(messageId, emoji) {
+    const key = `selfChatHistory_${currentUser.id}`;
+    const history = JSON.parse(localStorage.getItem(key)) || [];
+
+    const messageIndex = history.findIndex(msg => msg.id === messageId);
+    if (messageIndex !== -1) {
+        const message = history[messageIndex];
+        if (!message.reactions) {
+            message.reactions = [];
+        }
+
+        // Проверяем, есть ли уже такая реакция
+        const existingReaction = message.reactions.find(r => r.emoji === emoji);
+        if (existingReaction) {
+            existingReaction.count++;
+        } else {
+            message.reactions.push({
+                emoji: emoji,
+                count: 1,
+                users: [currentUser.username]
+            });
+        }
+
+        // Обновляем историю
+        localStorage.setItem(key, JSON.stringify(history));
+
+        // Обновляем отображение сообщения
+        updateSelfChatMessage(messageId, message);
+    }
+}
+
+// Функция для удаления реакции из Self Chat
+function removeSelfChatReaction(messageId, emoji) {
+    const key = `selfChatHistory_${currentUser.id}`;
+    const history = JSON.parse(localStorage.getItem(key)) || [];
+
+    const messageIndex = history.findIndex(msg => msg.id === messageId);
+    if (messageIndex !== -1) {
+        const message = history[messageIndex];
+        if (message.reactions) {
+            const reactionIndex = message.reactions.findIndex(r => r.emoji === emoji);
+            if (reactionIndex !== -1) {
+                const reaction = message.reactions[reactionIndex];
+                reaction.count--;
+
+                // Если количество реакций стало 0, удаляем реакцию
+                if (reaction.count <= 0) {
+                    message.reactions.splice(reactionIndex, 1);
+                }
+            }
+        }
+
+        // Обновляем историю
+        localStorage.setItem(key, JSON.stringify(history));
+
+        // Обновляем отображение сообщения
+        updateSelfChatMessage(messageId, message);
+    }
+}
+
+// Функция для обновления отображения сообщения в Self Chat
+function updateSelfChatMessage(messageId, updatedMessage) {
+    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageElement) {
+        messageElement.remove(); // Удаляем старое сообщение
+
+        // Добавляем обновленное сообщение
+        addMessageToUI(updatedMessage);
     }
 }
 
@@ -1439,6 +1617,11 @@ function initializeDraggableCallWindow() {
 }
 
 async function loadDMHistory(userId) {
+   // Не загружаем историю для Self Chat, так как она хранится локально
+   if (userId === currentUser.id) {
+       return;
+   }
+
    const messagesContainer = document.getElementById('messagesContainer');
 
    if (!messagesContainer) {
@@ -1488,6 +1671,19 @@ function populateDMList(friends) {
    }
 
    dmList.innerHTML = '';
+
+   // Добавляем чат с самим собой в начало списка
+   const selfChatItem = document.createElement('div');
+   selfChatItem.className = 'channel';
+   selfChatItem.setAttribute('data-dm-id', 'self');
+   selfChatItem.innerHTML = `
+       <div class="friend-avatar self-chat-icon">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+       <span>Self Chat</span>
+   `;
+   selfChatItem.addEventListener('click', () => {
+       startSelfChat();
+   });
+   dmList.appendChild(selfChatItem);
 
    if (friends.length === 0) {
        const emptyDM = document.createElement('div');
