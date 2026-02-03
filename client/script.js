@@ -64,6 +64,9 @@ function initializeApp() {
     // Добавляем обработчик для запроса разрешения при первом взаимодействии пользователя
     document.addEventListener('click', requestNotificationPermissionOnce, { once: true });
     document.addEventListener('keydown', requestNotificationPermissionOnce, { once: true });
+
+    // Setup reply to selection functionality
+    setupReplyToSelection();
 }
 
 function requestNotificationPermissionOnce() {
@@ -865,7 +868,12 @@ function addMessageToUI(message) {
 
     const text = document.createElement('div');
     text.className = 'message-text';
-    text.textContent = message.text;
+
+    // Process the message text to handle quotes
+    const processedText = formatQuotedText(message.text);
+
+    // Set the HTML content to display formatted quotes
+    text.innerHTML = processedText;
 
     const reactionsContainer = document.createElement('div');
     reactionsContainer.className = 'message-reactions';
@@ -906,8 +914,26 @@ function addMessageToUI(message) {
     header.appendChild(timestamp);
     content.appendChild(header);
     content.appendChild(text);
-    content.appendChild(reactionsContainer);
-    content.appendChild(addReactionBtn);
+
+    // Create a container for reactions
+    const reactionsAndActionsContainer = document.createElement('div');
+    reactionsAndActionsContainer.className = 'reactions-and-actions-container';
+    reactionsAndActionsContainer.appendChild(reactionsContainer);
+
+    // Add reply button
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'reply-btn';
+    replyBtn.textContent = '↪';  // Right arrow for reply
+    replyBtn.title = 'Reply to message';
+    replyBtn.onclick = () => replyToMessage(message);
+
+    // Create a container for action buttons to position them properly
+    const actionsContainer = document.createElement('div');
+    actionsContainer.className = 'message-actions';
+    actionsContainer.appendChild(replyBtn);
+    actionsContainer.appendChild(addReactionBtn);
+    reactionsAndActionsContainer.appendChild(actionsContainer);
+    content.appendChild(reactionsAndActionsContainer);
 
     messageGroup.appendChild(avatar);
     messageGroup.appendChild(content);
@@ -924,6 +950,148 @@ function formatTimestamp(date) {
     const hours = messageDate.getHours().toString().padStart(2, '0');
     const minutes = messageDate.getMinutes().toString().padStart(2, '0');
     return `Today at ${hours}:${minutes}`;
+}
+
+
+// Function to reply to a message
+function replyToMessage(message) {
+    const messageInput = document.getElementById('messageInput');
+
+    if (!messageInput) {
+        console.error('Message input element not found');
+        return;
+    }
+
+    // Format the reply message
+    const replyText = `> **${message.author}**: ${message.text}\n\n`;
+
+    // Insert the reply text at the beginning of the input
+    const currentValue = messageInput.value;
+    messageInput.value = replyText + currentValue;
+
+    // Focus the input and move cursor to the end
+    messageInput.focus();
+    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+
+    // Adjust textarea height
+    adjustTextareaHeight(messageInput);
+}
+
+// Function to handle reply to selected text
+function setupReplyToSelection() {
+    document.addEventListener('mouseup', function() {
+        const selection = window.getSelection();
+        if (selection.toString().trim() !== '') {
+            // Create a temporary button to allow replying to selection
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+
+            // Create reply button for selection
+            const replyButton = document.createElement('button');
+            replyButton.className = 'reply-selection-btn';
+            replyButton.textContent = '↪';
+            replyButton.title = 'Reply to selection';
+            replyButton.style.position = 'fixed';
+            replyButton.style.left = rect.left + 'px';
+            replyButton.style.top = (rect.top - 30) + 'px';
+            replyButton.style.zIndex = '1000';
+            replyButton.style.background = 'var(--accent)';
+            replyButton.style.color = 'white';
+            replyButton.style.border = 'none';
+            replyButton.style.borderRadius = '50%';
+            replyButton.style.width = '30px';
+            replyButton.style.height = '30px';
+            replyButton.style.cursor = 'pointer';
+
+            replyButton.onclick = function() {
+                const selectedText = selection.toString();
+                const messageInput = document.getElementById('messageInput');
+
+                if (messageInput) {
+                    // Find the message that contains the selection
+                    const messageElement = selection.anchorNode.parentElement.closest('.message-group');
+                    let author = 'Unknown';
+
+                    if (messageElement) {
+                        const authorElement = messageElement.querySelector('.message-author');
+                        if (authorElement) {
+                            author = authorElement.textContent;
+                        }
+                    }
+
+                    // Format the reply to selection
+                    const replyText = `> **${author}**: ${selectedText}\n\n`;
+
+                    const currentValue = messageInput.value;
+                    messageInput.value = replyText + currentValue;
+
+                    messageInput.focus();
+                    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+                    adjustTextareaHeight(messageInput);
+                }
+
+                document.body.removeChild(replyButton);
+            };
+
+            document.body.appendChild(replyButton);
+
+            // Remove button after a short time
+            setTimeout(() => {
+                if (replyButton.parentNode) {
+                    document.body.removeChild(replyButton);
+                }
+            }, 3000);
+        }
+    });
+}
+
+// Function to parse and format replied messages for display
+function formatQuotedText(text) {
+    // Split text into lines
+    const lines = text.split('\n');
+    let formattedLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Check if the line is a quoted/replied line
+        if (line.startsWith('> ')) {
+            // Extract the quoted content
+            let quotedContent = line.substring(2); // Remove '> '
+
+            // Check if it's a formatted quote with author
+            if (quotedContent.startsWith('**') && quotedContent.includes('**: ')) {
+                const colonIndex = quotedContent.indexOf('**: ');
+                if (colonIndex !== -1) {
+                    const author = quotedContent.substring(2, colonIndex); // Remove '**'
+                    const quoteText = quotedContent.substring(colonIndex + 4); // Remove '**author**: '
+
+                    formattedLines.push(`<div class="quoted-message"><span class="quote-author">**${escapeHtml(author)}**:</span> ${escapeHtml(quoteText)}</div>`);
+                } else {
+                    // Simple quote without author
+                    formattedLines.push(`<div class="quoted-message">${escapeHtml(quotedContent)}</div>`);
+                }
+            } else {
+                // Simple quote without author
+                formattedLines.push(`<div class="quoted-message">${escapeHtml(quotedContent)}</div>`);
+            }
+        } else {
+            // Regular text line
+            formattedLines.push(escapeHtml(line));
+        }
+    }
+
+    return formattedLines.join('');
+}
+
+// Helper function to escape HTML to prevent XSS
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 function scrollToBottom() {
