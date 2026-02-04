@@ -62,6 +62,46 @@ function initializeDatabase() {
             )
         `);
 
+        // Check if dm_id column exists, if not add it
+        db.all("PRAGMA table_info(file_uploads)", (err, rows) => {
+            if (!err) {
+                const hasDmIdColumn = rows.some(row => row.name === 'dm_id');
+                if (!hasDmIdColumn) {
+                    db.run("ALTER TABLE file_uploads ADD COLUMN dm_id INTEGER;", (err) => {
+                        if (err) {
+                            console.log("Error adding dm_id column:", err.message);
+                        } else {
+                            console.log("Added dm_id column to file_uploads table");
+                        }
+                    });
+                }
+
+                // Check if sender_id and receiver_id columns exist, if not add them
+                const hasSenderIdColumn = rows.some(row => row.name === 'sender_id');
+                const hasReceiverIdColumn = rows.some(row => row.name === 'receiver_id');
+
+                if (!hasSenderIdColumn) {
+                    db.run("ALTER TABLE file_uploads ADD COLUMN sender_id INTEGER;", (err) => {
+                        if (err) {
+                            console.log("Error adding sender_id column:", err.message);
+                        } else {
+                            console.log("Added sender_id column to file_uploads table");
+                        }
+                    });
+                }
+
+                if (!hasReceiverIdColumn) {
+                    db.run("ALTER TABLE file_uploads ADD COLUMN receiver_id INTEGER;", (err) => {
+                        if (err) {
+                            console.log("Error adding receiver_id column:", err.message);
+                        } else {
+                            console.log("Added receiver_id column to file_uploads table");
+                        }
+                    });
+                }
+            }
+        });
+
         // Reactions table
         db.run(`
             CREATE TABLE IF NOT EXISTS reactions (
@@ -70,7 +110,7 @@ function initializeDatabase() {
                 message_id INTEGER,
                 user_id INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (message_id) REFERENCES messages(id),
+                FOREIGN KEY (message_id) REFERENCES direct_messages(id),
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 UNIQUE(message_id, user_id, emoji)
             )
@@ -237,6 +277,26 @@ const fileDB = {
             db.all(sql, [dmId], (err, rows) => {
                 if (err) reject(err);
                 else resolve(rows);
+            });
+        });
+    },
+
+    updateSenderReceiver: (fileId, senderId, receiverId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE file_uploads SET sender_id = ?, receiver_id = ? WHERE id = ?';
+            db.run(sql, [senderId, receiverId, fileId], function(err) {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    },
+
+    linkToFileMessage: (fileId, messageId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE file_uploads SET dm_id = ? WHERE id = ?';
+            db.run(sql, [messageId, fileId], function(err) {
+                if (err) reject(err);
+                else resolve();
             });
         });
     }

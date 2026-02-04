@@ -119,28 +119,33 @@ function connectToSocketIO() {
 
         // WebRTC Signaling
         socket.on('new-dm', (data) => {
-            if (data.senderId === currentDMUserId) {
+            // Отображаем сообщение, если оно от пользователя, с которым мы общаемся
+            if (currentView === 'dm' && currentDMUserId && data.senderId === currentDMUserId) {
                 addMessageToUI({
                     id: data.message.id,
                     author: data.message.author,
                     avatar: data.message.avatar,
                     text: data.message.text,
                     timestamp: data.message.timestamp,
-                    reactions: data.message.reactions || []
+                    reactions: data.message.reactions || [],
+                    file: data.message.file  // Добавляем информацию о файле, если она есть
                 });
                 scrollToBottom();
             }
         });
 
         socket.on('dm-sent', (data) => {
-            if (data.receiverId === currentDMUserId) {
+            // Отображаем наше сообщение, если оно было отправлено в текущий чат
+            if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
+                // Добавляем сообщение, которое мы отправили
                 addMessageToUI({
                     id: data.message.id,
                     author: currentUser.username,
                     avatar: currentUser.avatar,
                     text: data.message.text,
                     timestamp: data.message.timestamp,
-                    reactions: data.message.reactions || []
+                    reactions: data.message.reactions || [],
+                    file: data.message.file  // Добавляем информацию о файле, если она есть
                 });
                 scrollToBottom();
             }
@@ -719,7 +724,8 @@ function loadSelfChatHistory() {
             avatar: message.avatar,
             text: message.text,
             timestamp: message.timestamp,
-            reactions: message.reactions || []
+            reactions: message.reactions || [],
+            file: message.file  // Добавляем информацию о файле, если она есть
         });
     });
 
@@ -874,6 +880,172 @@ function addMessageToUI(message) {
 
     // Set the HTML content to display formatted quotes
     text.innerHTML = processedText;
+
+    // If the message contains a file, add it to the message
+    if (message.file) {
+        const fileDiv = document.createElement('div');
+        fileDiv.className = 'file-attachment';
+
+        // Determine file type and show appropriate preview/icon
+        const fileExtension = message.file.filename.split('.').pop().toLowerCase();
+        const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
+        const videoExtensions = ['mp4', 'webm', 'mov', 'avi'];
+        const audioExtensions = ['mp3', 'wav', 'ogg', 'flac'];
+        // Определяем, является ли файл текстовым по MIME-типу или расширению
+        function isTextFile(file) {
+            // Проверяем по MIME-типу
+            if (file.type) {
+                // Любой MIME-тип, начинающийся с "text/" - текстовый файл
+                if (file.type.startsWith('text/')) {
+                    return true;
+                }
+                // Некоторые двоичные файлы могут иметь расширение, но не MIME-тип
+                // Поэтому проверяем и популярные текстовые MIME-типы
+                const textMimeTypes = [
+                    'application/json', 'application/javascript', 'application/xml',
+                    'application/x-sh', 'application/x-shellscript', 'application/octet-stream',
+                    'application/x-msdownload', 'application/x-executable', 'application/x-makesys',
+                    'application/x-msdownload', 'binary/octet-stream'
+                ];
+                if (textMimeTypes.includes(file.type)) {
+                    // Для некоторых типов, которые могут быть текстовыми, дополнительно проверяем расширение
+                    const fileExtension = file.filename.split('.').pop().toLowerCase();
+                    const textExtensions = ['sh', 'log', 'js', 'json', 'xml', 'csv', 'md', 'html', 'css', 'sql', 'py', 'java', 'cpp', 'c', 'h', 'hpp', 'ts', 'tsx', 'jsx', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'bat', 'ps1', 'bash', 'zsh', 'pl', 'rb', 'php', 'asp', 'aspx', 'sql', 'sqlitedb', 'env', 'toml', 'lock'];
+                    return textExtensions.includes(fileExtension);
+                }
+            }
+
+            // Проверяем по расширению
+            const textExtensions = ['txt', 'pdf', 'doc', 'docx', 'sh', 'log', 'js', 'py', 'html', 'css', 'json', 'xml', 'csv', 'md', 'sql', 'java', 'cpp', 'c', 'h', 'hpp', 'ts', 'tsx', 'jsx', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'bat', 'ps1', 'bash', 'zsh', 'pl', 'rb', 'php', 'asp', 'aspx', 'sql', 'sqlitedb', 'env', 'toml', 'lock'];
+            const fileExtension = file.filename.split('.').pop().toLowerCase();
+            return textExtensions.includes(fileExtension);
+        }
+
+        if (imageExtensions.includes(fileExtension)) {
+            // Image preview
+            const img = document.createElement('img');
+            img.src = message.file.url;
+            img.alt = message.file.filename;
+            img.className = 'file-preview-image';
+            img.style.maxWidth = '300px';
+            img.style.maxHeight = '300px';
+            img.style.borderRadius = '8px';
+            img.style.marginTop = '10px';
+
+            // Add click handler to open image in new tab
+            img.addEventListener('click', () => {
+                window.open(message.file.url, '_blank');
+            });
+
+            fileDiv.appendChild(img);
+        } else if (videoExtensions.includes(fileExtension)) {
+            // Video preview
+            const video = document.createElement('video');
+            video.src = message.file.url;
+            video.controls = true;
+            video.className = 'file-preview-video';
+            video.style.maxWidth = '300px';
+            video.style.maxHeight = '300px';
+            video.style.borderRadius = '8px';
+            video.style.marginTop = '10px';
+
+            fileDiv.appendChild(video);
+        } else if (audioExtensions.includes(fileExtension)) {
+            // Audio preview
+            const audio = document.createElement('audio');
+            audio.src = message.file.url;
+            audio.controls = true;
+            audio.className = 'file-preview-audio';
+            audio.style.width = '100%';
+            audio.style.marginTop = '10px';
+
+            fileDiv.appendChild(audio);
+        } else if (isTextFile(message.file)) {
+            // For text-based files, create a preview with a snippet
+            const filePreview = document.createElement('div');
+            filePreview.className = 'file-preview-text';
+            filePreview.style.marginTop = '10px';
+            filePreview.style.padding = '10px';
+            filePreview.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+            filePreview.style.borderRadius = '4px';
+            filePreview.style.maxWidth = '300px';
+
+            // Create file info header
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'file-info';
+            fileInfo.style.fontWeight = 'bold';
+            fileInfo.style.marginBottom = '5px';
+            fileInfo.textContent = `📄 ${message.file.filename}`;
+
+            // Create a preview of the file content (first 100 characters)
+            const fileContentPreview = document.createElement('div');
+            fileContentPreview.className = 'file-content-preview';
+            fileContentPreview.style.fontSize = '14px';
+            fileContentPreview.style.whiteSpace = 'pre-wrap';
+            fileContentPreview.style.overflow = 'hidden';
+            fileContentPreview.style.textOverflow = 'ellipsis';
+            fileContentPreview.style.maxHeight = '60px';
+
+            // Create a link to download/view the full file
+            const fileLink = document.createElement('a');
+            fileLink.href = message.file.url;
+            fileLink.textContent = 'Download/View Full File';
+            fileLink.target = '_blank';
+            fileLink.rel = 'noopener noreferrer';
+            fileLink.style.display = 'inline-block';
+            fileLink.style.marginTop = '5px';
+            fileLink.style.color = '#74c0fc';
+            fileLink.style.textDecoration = 'none';
+
+            // Add click handler to open file in new tab
+            fileLink.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent triggering parent click handlers
+            });
+
+            // Add elements to the preview container
+            filePreview.appendChild(fileInfo);
+            filePreview.appendChild(fileContentPreview);
+            filePreview.appendChild(fileLink);
+
+            // Attempt to fetch a small portion of the text file for preview
+            fetch(`${message.file.url}?t=${Date.now()}`, {
+                cache: 'no-cache'
+            })
+                .then(response => response.text())
+                .then(fileText => {
+                    // Take first 100 characters and add ellipsis if needed
+                    const previewText = fileText.length > 100 ?
+                        fileText.substring(0, 100) + '...' :
+                        fileText;
+                    fileContentPreview.textContent = previewText;
+                })
+                .catch(error => {
+                    console.error('Could not load file preview:', error);
+                    fileContentPreview.textContent = '[Unable to load preview]';
+                });
+
+            fileDiv.appendChild(filePreview);
+        } else {
+            // Generic file link
+            const fileLink = document.createElement('a');
+            fileLink.href = message.file.url;
+            fileLink.textContent = `📄 ${message.file.filename}`;
+            fileLink.target = '_blank';
+            fileLink.rel = 'noopener noreferrer';
+            fileLink.className = 'file-link';
+            fileLink.style.display = 'block';
+            fileLink.style.padding = '8px';
+            fileLink.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+            fileLink.style.borderRadius = '4px';
+            fileLink.style.marginTop = '8px';
+            fileLink.style.textDecoration = 'none';
+            fileLink.style.color = '#74c0fc';
+
+            fileDiv.appendChild(fileLink);
+        }
+
+        content.appendChild(fileDiv);
+    }
 
     const reactionsContainer = document.createElement('div');
     reactionsContainer.className = 'message-reactions';
@@ -1408,6 +1580,7 @@ async function uploadFile(file) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('dmId', currentDMUserId); // Добавляем ID получателя для DM
+        formData.append('senderId', currentUser.id); // Добавляем ID отправителя
 
         const response = await fetch(`${getApiUrl()}/api/upload`, {
             method: 'POST',
@@ -1424,18 +1597,28 @@ async function uploadFile(file) {
         const fileData = await response.json();
 
         const message = {
+            id: Date.now(), // используем временную метку как ID
             author: currentUser.username,
             avatar: currentUser.avatar,
-            text: `Uploaded ${file.name}`,
+            text: '', // Убираем текст "Uploaded [filename]"
             file: fileData,
-            timestamp: new Date()
+            timestamp: new Date(),
+            reactions: []
         };
 
-        if (socket && socket.connected && currentDMUserId) {
-            socket.emit('send-dm', {
-                receiverId: currentDMUserId,
-                message: message
-            });
+        // Если это Self Chat, сохраняем сообщение локально
+        if (currentDMUserId === currentUser.id) {
+            addMessageToUI(message);
+            saveSelfMessageToHistory(message);
+            scrollToBottom();
+        } else if (currentDMUserId) {
+            // Для обычных DM отправляем через сокет
+            if (socket && socket.connected) {
+                socket.emit('send-dm', {
+                    receiverId: currentDMUserId,
+                    message: message
+                });
+            }
         }
 
     } catch (error) {
@@ -1800,8 +1983,9 @@ async function loadDMHistory(userId) {
    messagesContainer.innerHTML = '';
 
    try {
-       const response = await fetch(`${getApiUrl()}/api/dm/${userId}`, {
-           headers: { 'Authorization': `Bearer ${token}` }
+       const response = await fetch(`${getApiUrl()}/api/dm/${userId}?t=${Date.now()}`, {
+           headers: { 'Authorization': `Bearer ${token}` },
+           cache: 'no-cache'
        });
        if (response.ok) {
            const messages = await response.json();
@@ -1812,7 +1996,8 @@ async function loadDMHistory(userId) {
                    avatar: message.avatar || message.username.charAt(0).toUpperCase(),
                    text: message.content,
                    timestamp: message.created_at,
-                   reactions: message.reactions || []
+                   reactions: message.reactions || [],
+                   file: message.file  // Добавляем информацию о файле, если она есть
                });
            });
        } else {

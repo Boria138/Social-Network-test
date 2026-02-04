@@ -264,15 +264,20 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
             return res.status(400).json({ error: 'No file uploaded' });
         }
 
-        const { dmId } = req.body;
+        const { dmId, senderId } = req.body;
+        // Сохраняем файл с ID отправителя и получателя, но без связи с конкретным сообщением
+        // Мы будем связывать файл с сообщением позже, когда сообщение будет создано
         const fileRecord = await fileDB.create(
             req.file.filename,
             req.file.path,
             req.file.mimetype,
             req.file.size,
             req.user.id,
-            dmId
+            null  // Пока не знаем ID сообщения
         );
+
+        // Обновляем запись файла, чтобы она содержала ID отправителя и получателя
+        await fileDB.updateSenderReceiver(fileRecord.id, senderId, dmId);
 
         res.json({
             id: fileRecord.id,
@@ -293,16 +298,38 @@ app.get('/api/dm/:userId', authenticateToken, async (req, res) => {
     try {
         const messages = await dmDB.getConversation(req.user.id, req.params.userId);
 
-        // For each message, get its reactions
-        const messagesWithReactions = await Promise.all(messages.map(async (message) => {
+        // For each message, get its reactions and associated files
+        const messagesWithReactionsAndFiles = await Promise.all(messages.map(async (message) => {
             const reactions = await reactionDB.getByMessage(message.id);
+
+            // Get associated file for this message
+            const files = await fileDB.getByDM(message.id);
+            let file = null;
+            if (files.length > 0) {
+                const fileRecord = files[0];
+                file = {
+                    id: fileRecord.id,
+                    filename: fileRecord.filename,
+                    url: `/uploads/${fileRecord.filepath.split('/').pop()}`, // Извлекаем имя файла из пути
+                    type: fileRecord.filetype,
+                    size: fileRecord.filesize
+                };
+            }
+
             return {
                 ...message,
-                reactions: reactions
+                reactions: reactions,
+                file: file  // Добавляем информацию о файле, если он есть
             };
         }));
 
-        res.json(messagesWithReactions);
+        // Устанавливаем заголовки для предотвращения кэширования
+        res.set({
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        });
+        res.json(messagesWithReactionsAndFiles);
     } catch (error) {
         res.status(500).json({ error: 'Failed to get messages' });
     }
@@ -478,11 +505,21 @@ io.on('connection', async (socket) => {
             const { receiverId, message } = data;
             const sender = await userDB.findById(socket.userId);
 
+            // Если сообщение содержит файл и текст пустой, сохраняем пустую строку вместо текста "Uploaded [filename]"
+            let messageText = message.text;
+            if (message.file && message.text === '') {
+                messageText = '';
+            }
             const savedMessage = await dmDB.create(
-                message.text,
+                messageText,
                 socket.userId,
                 receiverId
             );
+
+            // Если сообщение содержит файл, обновляем запись файла, чтобы она указывала на ID сообщения
+            if (message.file) {
+                await fileDB.linkToFileMessage(message.file.id, savedMessage.id);
+            }
 
             // Get reactions for the new message
             const reactions = await reactionDB.getByMessage(savedMessage.id);
@@ -493,7 +530,8 @@ io.on('connection', async (socket) => {
                 avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
                 text: message.text,
                 timestamp: new Date(),
-                reactions: reactions
+                reactions: reactions,
+                file: message.file  // Добавляем информацию о файле, если она есть
             };
 
             const receiverSocket = Array.from(users.values())
