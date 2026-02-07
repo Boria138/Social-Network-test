@@ -966,7 +966,7 @@ function addMessageToUI(message) {
             filePreview.className = 'file-preview-text';
             filePreview.style.marginTop = '10px';
             filePreview.style.padding = '10px';
-            filePreview.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+            filePreview.style.backgroundColor = 'var(--glass)';
             filePreview.style.borderRadius = '4px';
             filePreview.style.maxWidth = '300px';
 
@@ -994,7 +994,7 @@ function addMessageToUI(message) {
             fileLink.rel = 'noopener noreferrer';
             fileLink.style.display = 'inline-block';
             fileLink.style.marginTop = '5px';
-            fileLink.style.color = '#74c0fc';
+            fileLink.style.color = 'var(--accent)';
             fileLink.style.textDecoration = 'none';
 
             // Add click handler to open file in new tab
@@ -1035,11 +1035,11 @@ function addMessageToUI(message) {
             fileLink.className = 'file-link';
             fileLink.style.display = 'block';
             fileLink.style.padding = '8px';
-            fileLink.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+            fileLink.style.backgroundColor = 'var(--glass)';
             fileLink.style.borderRadius = '4px';
             fileLink.style.marginTop = '8px';
             fileLink.style.textDecoration = 'none';
-            fileLink.style.color = '#74c0fc';
+            fileLink.style.color = 'var(--accent)';
 
             fileDiv.appendChild(fileLink);
         }
