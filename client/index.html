@@ -62,6 +62,11 @@
                 </div>
             </div>
             <div class="user-controls">
+                <button class="control-btn" id="themeToggleBtn" title="Change Theme">
+                    <svg width="20" height="20" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M12,2A7,7,0,0,0,5,9c0,6.15,7,13,7,13s7-6.85,7-13A7,7,0,0,0,12,2Zm0,9.5a2.5,2.5,0,0,1,0-5,2.5,2.5,0,0,1,0,5Z"/>
+                    </svg>
+                </button>
                 <button class="control-btn" id="muteBtn" title="Mute">
                     <svg class="icon-normal" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C10.895 2 10 2.895 10 4V12C10 13.105 10.895 14 12 14C13.105 14 14 13.105 14 12V4C14 2.895 13.105 2 12 2ZM19 10V12C19 15.866 15.866 19 12 19C8.134 19 5 15.866 5 12V10H3V12C3 16.418 6.269 20.099 10.5 20.856V24H13.5V20.856C17.731 20.099 21 16.418 21 12V10H19Z"/></svg>
                     <svg class="icon-slashed" style="display: none;" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 14c1.105 0 2-.895 2-2V4c0-1.105-.895-2-2-2s-2 .895-2 2v8c0 1.105.895 2 2 2zM19 12v-2h-2v2c0 2.757-1.79 5.08-4.2 5.86v2.006h2.2v2H9.5v-2h2.2V17.86C9.29 17.08 7.5 14.757 7.5 12V10H5v2c0 3.53 2.61 6.43 6 6.92V22h2v-3.08c3.39-.49 6-3.39 6-6.92zm-2.293-9.293l-1.414-1.414L3 13.586l1.414 1.414L16.707 2.707z"/></svg>
@@ -187,6 +192,54 @@
                 <button id="acceptCallBtn" class="call-action-btn accept">Accept</button>
                 <button id="rejectCallBtn" class="call-action-btn reject">Decline</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Theme Selector Dropdown -->
+    <div id="themeSelector" class="theme-selector">
+        <h3>THEME & ACCENT COLOR</h3>
+        <div class="theme-options">
+            <div class="theme-option" data-theme="default">
+                <div class="theme-preview" style="background: linear-gradient(135deg, #0a0f18, #0c1322);"></div>
+                <span>Default Dark</span>
+            </div>
+            <div class="theme-option" data-theme="midnight">
+                <div class="theme-preview" style="background: linear-gradient(135deg, #0a0a1a, #121226);"></div>
+                <span>Midnight Blue</span>
+            </div>
+            <div class="theme-option" data-theme="forest">
+                <div class="theme-preview" style="background: linear-gradient(135deg, #0a1a10, #0f2a1f);"></div>
+                <span>Forest Green</span>
+            </div>
+            <div class="theme-option" data-theme="sunset">
+                <div class="theme-preview" style="background: linear-gradient(135deg, #1a0a1a, #261212);"></div>
+                <span>Sunset Purple</span>
+            </div>
+            <div class="theme-option" data-theme="ocean">
+                <div class="theme-preview" style="background: linear-gradient(135deg, #0a1a26, #122626);"></div>
+                <span>Ocean Blue</span>
+            </div>
+            <div class="theme-option" data-theme="coffee">
+                <div class="theme-preview" style="background: linear-gradient(135deg, #261c14, #3c2a1f);"></div>
+                <span>Coffee Brown</span>
+            </div>
+        </div>
+        <div class="accent-colors">
+            <div class="accent-color selected" style="background-color: #8b5cf6;" data-accent="#8b5cf6" title="Purple"></div>
+            <div class="accent-color" style="background-color: #60a5fa;" data-accent="#60a5fa" title="Blue"></div>
+            <div class="accent-color" style="background-color: #34d399;" data-accent="#34d399" title="Green"></div>
+            <div class="accent-color" style="background-color: #fbbf24;" data-accent="#fbbf24" title="Yellow"></div>
+            <div class="accent-color" style="background-color: #f87171;" data-accent="#f87171" title="Red"></div>
+            <div class="accent-color" style="background-color: #ec4899;" data-accent="#ec4899" title="Pink"></div>
+        </div>
+        <div class="custom-color-control">
+            <label for="customColorPicker">Custom Color:</label>
+            <input type="color" id="customColorPicker" value="#8b5cf6">
+            <button id="applyCustomColorBtn">Apply</button>
+        </div>
+        <div class="transparency-control">
+            <label for="transparencySlider">Glass Effect: <span id="transparencyValue">86%</span></label>
+            <input type="range" id="transparencySlider" min="50" max="100" value="86">
         </div>
     </div>
 

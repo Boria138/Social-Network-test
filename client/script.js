@@ -2599,3 +2599,461 @@ function makeInterfaceResizable(callInterface) {
     if (!isMobile()) closeDrawer();
   });
 })();
+
+// =======================================================
+// Theme and Accent Color Switcher
+// =======================================================
+
+// Theme definitions with CSS variable values
+const THEMES = {
+    default: {
+        '--bg-0': '#0a0f18',
+        '--bg-1': '#0c1322',
+        '--glass': 'rgba(16, 20, 30, .86)',
+        '--glass-2': 'rgba(16, 20, 30, .76)',
+        '--glass-strong': 'rgba(16, 20, 30, .92)',
+        '--text': 'rgba(255,255,255,.92)',
+        '--muted': 'rgba(255,255,255,.62)',
+        '--muted-2': 'rgba(255,255,255,.48)',
+        '--stroke': 'rgba(255,255,255,.08)',
+        '--stroke-soft': 'rgba(255,255,255,.05)'
+    },
+    midnight: {
+        '--bg-0': '#0a0a1a',
+        '--bg-1': '#121226',
+        '--glass': 'rgba(10, 10, 26, .86)',
+        '--glass-2': 'rgba(18, 18, 38, .76)',
+        '--glass-strong': 'rgba(10, 10, 26, .92)',
+        '--text': 'rgba(255,255,255,.92)',
+        '--muted': 'rgba(255,255,255,.62)',
+        '--muted-2': 'rgba(255,255,255,.48)',
+        '--stroke': 'rgba(255,255,255,.08)',
+        '--stroke-soft': 'rgba(255,255,255,.05)'
+    },
+    forest: {
+        '--bg-0': '#0a1a10',
+        '--bg-1': '#0f2a1f',
+        '--glass': 'rgba(10, 26, 16, .86)',
+        '--glass-2': 'rgba(15, 42, 31, .76)',
+        '--glass-strong': 'rgba(10, 26, 16, .92)',
+        '--text': 'rgba(255,255,255,.92)',
+        '--muted': 'rgba(255,255,255,.62)',
+        '--muted-2': 'rgba(255,255,255,.48)',
+        '--stroke': 'rgba(255,255,255,.08)',
+        '--stroke-soft': 'rgba(255,255,255,.05)'
+    },
+    sunset: {
+        '--bg-0': '#1a0a1a',
+        '--bg-1': '#261212',
+        '--glass': 'rgba(38, 18, 26, .86)',
+        '--glass-2': 'rgba(48, 24, 36, .76)',
+        '--glass-strong': 'rgba(48, 24, 36, .92)',
+        '--text': 'rgba(255,255,255,.92)',
+        '--muted': 'rgba(255,255,255,.62)',
+        '--muted-2': 'rgba(255,255,255,.48)',
+        '--stroke': 'rgba(255,255,255,.08)',
+        '--stroke-soft': 'rgba(255,255,255,.05)'
+    },
+    ocean: {
+        '--bg-0': '#0a1a26',
+        '--bg-1': '#122626',
+        '--glass': 'rgba(18, 38, 38, .86)',
+        '--glass-2': 'rgba(24, 48, 48, .76)',
+        '--glass-strong': 'rgba(24, 48, 48, .92)',
+        '--text': 'rgba(255,255,255,.92)',
+        '--muted': 'rgba(255,255,255,.62)',
+        '--muted-2': 'rgba(255,255,255,.48)',
+        '--stroke': 'rgba(255,255,255,.08)',
+        '--stroke-soft': 'rgba(255,255,255,.05)'
+    },
+    coffee: {
+        '--bg-0': '#261c14',
+        '--bg-1': '#3c2a1f',
+        '--glass': 'rgba(60, 42, 31, .86)',
+        '--glass-2': 'rgba(72, 54, 43, .76)',
+        '--glass-strong': 'rgba(72, 54, 43, .92)',
+        '--text': 'rgba(255,255,255,.92)',
+        '--muted': 'rgba(255,255,255,.62)',
+        '--muted-2': 'rgba(255,255,255,.48)',
+        '--stroke': 'rgba(255,255,255,.08)',
+        '--stroke-soft': 'rgba(255,255,255,.05)'
+    }
+};
+
+// Initialize theme system
+function initializeThemeSystem() {
+    // Load saved theme and accent color from localStorage
+    let savedTheme = localStorage.getItem('selectedTheme') || 'default';
+    
+    // If the saved theme is 'light', reset to default since we removed it
+    if (savedTheme === 'light') {
+        savedTheme = 'default';
+        localStorage.setItem('selectedTheme', 'default');
+    }
+    
+    // Validate that the saved theme exists in our current themes
+    const validThemes = Object.keys(THEMES);
+    if (!validThemes.includes(savedTheme)) {
+        savedTheme = 'default';
+        localStorage.setItem('selectedTheme', 'default');
+    }
+    
+    const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+    const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+    
+    // Apply saved theme
+    applyTheme(savedTheme);
+    
+    // Wait a moment for theme to apply, then apply accent color and transparency
+    setTimeout(() => {
+        applyAccentColor(savedAccent);
+        updateTransparency(savedTransparency);
+    }, 50);
+    
+    // Highlight the selected theme and accent in the UI
+    setTimeout(() => {
+        highlightSelectedTheme(savedTheme);
+        highlightSelectedAccent(savedAccent);
+    }, 100);
+    
+    // Add event listeners for theme selector
+    setupThemeSelector();
+}
+
+// Apply a theme by name
+function applyTheme(themeName) {
+    const theme = THEMES[themeName];
+    if (!theme) return;
+    
+    const root = document.documentElement;
+    for (const [property, value] of Object.entries(theme)) {
+        root.style.setProperty(property, value);
+    }
+    
+    // Update radial gradients in body background
+    updateBodyBackground(themeName);
+    
+    // Update transparency after applying theme
+    const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+    updateTransparency(savedTransparency);
+    
+    // Reapply accent color to ensure all elements update properly
+    const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+    setTimeout(() => {
+        applyAccentColor(savedAccent);
+    }, 30); // Small delay to ensure theme is applied first
+}
+
+// Apply accent color
+function applyAccentColor(color) {
+    const root = document.documentElement;
+    root.style.setProperty('--accent', color);
+    
+    // Update accentB to be a lighter version of the accent color
+    const accentB = lightenColor(color, 20);
+    root.style.setProperty('--accentB', accentB);
+    
+    // Update transparent versions of accent colors
+    const transparentAccent = hexToRgba(color, 0.26);
+    const transparentAccentB = hexToRgba(accentB, 0.16);
+    root.style.setProperty('--accent-transparent', transparentAccent);
+    root.style.setProperty('--accentB-transparent', transparentAccentB);
+    
+    // Update other transparent accent variations
+    const transparentAccent20 = hexToRgba(color, 0.20);
+    const transparentAccent25 = hexToRgba(color, 0.25);
+    const transparentAccent32 = hexToRgba(color, 0.32);
+    const transparentAccent18 = hexToRgba(color, 0.18);
+    
+    root.style.setProperty('--accent-hover-bg', transparentAccent20);
+    root.style.setProperty('--accent-border-focus', transparentAccent32);
+    root.style.setProperty('--accent-shadow-focus', transparentAccent18);
+    root.style.setProperty('--accent-reaction-hover', transparentAccent25);
+    
+    // Update body background to reflect new accent colors
+    const currentTheme = localStorage.getItem('selectedTheme') || 'default';
+    updateBodyBackground(currentTheme);
+    
+    // Also update transparency to ensure all glass effects are consistent
+    const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+    setTimeout(() => {
+        updateTransparency(savedTransparency);
+    }, 10); // Very short delay to ensure accent colors are applied first
+}
+
+// Convert hex color to rgba with alpha
+function hexToRgba(hex, alpha) {
+    // Remove # if present
+    hex = hex.replace('#', '');
+    
+    // Parse r, g, b values
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Lighten a hex color by a percentage
+function lightenColor(hex, percent) {
+    // Convert hex to RGB
+    let r = parseInt(hex.substring(1, 3), 16);
+    let g = parseInt(hex.substring(3, 5), 16);
+    let b = parseInt(hex.substring(5, 7), 16);
+    
+    // Lighten each component
+    r = Math.min(255, Math.floor(r + (255 - r) * (percent / 100)));
+    g = Math.min(255, Math.floor(g + (255 - g) * (percent / 100)));
+    b = Math.min(255, Math.floor(b + (255 - b) * (percent / 100)));
+    
+    // Convert back to hex
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+// Update body background based on theme and accent color
+function updateBodyBackground(themeName) {
+    const body = document.body;
+    const theme = THEMES[themeName];
+    const accentColor = document.documentElement.style.getPropertyValue('--accent') || '#8b5cf6';
+    const accentBColor = document.documentElement.style.getPropertyValue('--accentB') || '#60a5fa';
+    
+    // Convert hex to rgba with opacity
+    const accent18 = hexToRgbaWithOpacity(accentColor, 0.18);
+    const accentB14 = hexToRgbaWithOpacity(accentBColor, 0.14);
+    const good10 = 'rgba(34,197,94,.10)'; // Good color is not themed
+    
+    // For all themes, use the original gradient with dynamic accent colors
+    body.style.background = `
+        radial-gradient(1200px 800px at 15% 20%, ${accent18}, transparent 55%),
+        radial-gradient(900px 700px at 85% 10%, ${accentB14}, transparent 55%),
+        radial-gradient(900px 700px at 75% 85%, ${good10}, transparent 60%),
+        linear-gradient(180deg, ${theme['--bg-0']}, ${theme['--bg-1']})
+    `;
+}
+
+// Convert hex color to rgba with specific opacity
+function hexToRgbaWithOpacity(hex, opacity) {
+    // Remove # if present
+    hex = hex.trim().replace('#', '');
+    
+    // Parse r, g, b values
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+// Highlight the selected theme in the UI
+function highlightSelectedTheme(themeName) {
+    const themeOptions = document.querySelectorAll('.theme-option');
+    themeOptions.forEach(option => {
+        option.classList.toggle('selected', option.dataset.theme === themeName);
+    });
+}
+
+// Highlight the selected accent color in the UI
+function highlightSelectedAccent(accentColor) {
+    const accentColors = document.querySelectorAll('.accent-color');
+    accentColors.forEach(color => {
+        color.classList.toggle('selected', color.dataset.accent === accentColor);
+    });
+    
+    // Update the custom color picker to match the selected color
+    const customColorPicker = document.getElementById('customColorPicker');
+    if (customColorPicker) {
+        customColorPicker.value = accentColor;
+    }
+}
+
+// Set up event listeners for the theme selector
+function setupThemeSelector() {
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+    const themeSelector = document.getElementById('themeSelector');
+    const transparencySlider = document.getElementById('transparencySlider');
+    const transparencyValue = document.getElementById('transparencyValue');
+    const customColorPicker = document.getElementById('customColorPicker');
+    const applyCustomColorBtn = document.getElementById('applyCustomColorBtn');
+    
+    if (!themeToggleBtn || !themeSelector) {
+        console.error('Theme toggle button or selector not found');
+        return;
+    }
+    
+    // Toggle theme selector visibility
+    themeToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        themeSelector.classList.toggle('visible');
+        
+        // Update slider value from stored transparency
+        if (transparencySlider) {
+            const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+            transparencySlider.value = savedTransparency;
+            if (transparencyValue) {
+                transparencyValue.textContent = `${savedTransparency}%`;
+            }
+        }
+        
+        // Update custom color picker value from saved accent
+        if (customColorPicker) {
+            const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+            customColorPicker.value = savedAccent;
+        }
+    });
+    
+    // Close theme selector when clicking elsewhere
+    document.addEventListener('click', (e) => {
+        if (!themeSelector.contains(e.target) && e.target !== themeToggleBtn) {
+            themeSelector.classList.remove('visible');
+        }
+    });
+    
+    // Theme selection
+    const themeOptions = document.querySelectorAll('.theme-option');
+    themeOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            const themeName = option.dataset.theme;
+            applyTheme(themeName);
+            highlightSelectedTheme(themeName);
+            
+            // Save selected theme to localStorage
+            localStorage.setItem('selectedTheme', themeName);
+            
+            // Force update transparency after theme change
+            const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+            setTimeout(() => {
+                updateTransparency(savedTransparency);
+            }, 50); // Small delay to ensure theme is applied first
+            
+            // Close the selector after selection
+            themeSelector.classList.remove('visible');
+        });
+    });
+    
+    // Accent color selection
+    const accentColors = document.querySelectorAll('.accent-color');
+    accentColors.forEach(color => {
+        color.addEventListener('click', () => {
+            const accentColor = color.dataset.accent;
+            applyAccentColor(accentColor);
+            highlightSelectedAccent(accentColor);
+            
+            // Save selected accent color to localStorage
+            localStorage.setItem('selectedAccent', accentColor);
+            
+            // Update custom color picker to match
+            if (customColorPicker) {
+                customColorPicker.value = accentColor;
+            }
+            
+            // Update transparency to ensure consistency
+            const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+            setTimeout(() => {
+                updateTransparency(savedTransparency);
+            }, 30);
+            
+            // Close the selector after selection
+            themeSelector.classList.remove('visible');
+        });
+    });
+    
+    // Custom color picker
+    if (customColorPicker) {
+        // Load saved accent color
+        const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+        customColorPicker.value = savedAccent;
+    }
+    
+    // Apply custom color button
+    if (applyCustomColorBtn && customColorPicker) {
+        applyCustomColorBtn.addEventListener('click', () => {
+            const customColor = customColorPicker.value;
+            applyAccentColor(customColor);
+            highlightSelectedAccent(customColor);
+            
+            // Save selected accent color to localStorage
+            localStorage.setItem('selectedAccent', customColor);
+            
+            // Update transparency to ensure consistency
+            const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+            setTimeout(() => {
+                updateTransparency(savedTransparency);
+            }, 30);
+            
+            // Close the selector after selection
+            themeSelector.classList.remove('visible');
+        });
+    }
+    
+    // Transparency slider
+    if (transparencySlider) {
+        // Load saved transparency level
+        const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
+        transparencySlider.value = savedTransparency;
+        if (transparencyValue) {
+            transparencyValue.textContent = `${savedTransparency}%`;
+        }
+        
+        // Update transparency when slider changes
+        transparencySlider.addEventListener('input', (e) => {
+            const transparency = e.target.value;
+            if (transparencyValue) {
+                transparencyValue.textContent = `${transparency}%`;
+            }
+            updateTransparency(transparency);
+            
+            // Save transparency level to localStorage
+            localStorage.setItem('transparencyLevel', transparency);
+        });
+    }
+}
+
+// Update transparency levels for glass effects
+function updateTransparency(level) {
+    const root = document.documentElement;
+    const currentTheme = localStorage.getItem('selectedTheme') || 'default';
+    
+    // Calculate opacity values based on the slider level
+    // Level 50 = 0.50 opacity, Level 100 = 1.00 opacity
+    const opacity = level / 100;
+    
+    // Base colors for different themes
+    let baseR, baseG, baseB;
+    
+    if (currentTheme === 'midnight') {
+        baseR = 10;
+        baseG = 10;
+        baseB = 26;
+    } else if (currentTheme === 'forest') {
+        baseR = 15;
+        baseG = 42;
+        baseB = 31;
+    } else if (currentTheme === 'sunset') {
+        baseR = 38;
+        baseG = 18;
+        baseB = 26;
+    } else if (currentTheme === 'ocean') {
+        baseR = 18;
+        baseG = 38;
+        baseB = 38;
+    } else if (currentTheme === 'coffee') {
+        baseR = 60;
+        baseG = 42;
+        baseB = 31;
+    } else { // default dark theme
+        baseR = 16;
+        baseG = 20;
+        baseB = 30;
+    }
+    
+    // Update glass effect variables
+    root.style.setProperty('--glass', `rgba(${baseR}, ${baseG}, ${baseB}, ${opacity})`);
+    root.style.setProperty('--glass-2', `rgba(${baseR}, ${baseG}, ${baseB}, ${Math.max(0.1, opacity - 0.1)})`);
+    root.style.setProperty('--glass-strong', `rgba(${baseR}, ${baseG}, ${baseB}, ${Math.min(0.98, opacity + 0.06)})`);
+    
+    // Trigger a reflow to force browser to update all elements
+    document.body.offsetHeight;
+}
+
+// Initialize theme system when DOM is loaded
+document.addEventListener('DOMContentLoaded', initializeThemeSystem);
