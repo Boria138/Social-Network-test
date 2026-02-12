@@ -1203,10 +1203,48 @@ function addMessageToUI(message) {
 }
 
 function formatTimestamp(date) {
+    // Convert the date to the user's local time zone
     const messageDate = new Date(date);
-    const hours = messageDate.getHours().toString().padStart(2, '0');
-    const minutes = messageDate.getMinutes().toString().padStart(2, '0');
-    return `Today at ${hours}:${minutes}`;
+    
+    // Use Intl.DateTimeFormat to format the date according to user's locale and timezone
+    const now = new Date();
+    
+    // Check if the message was sent today (in user's local timezone)
+    const isToday = messageDate.getDate() === now.getDate() &&
+                    messageDate.getMonth() === now.getMonth() &&
+                    messageDate.getFullYear() === now.getFullYear();
+    
+    // Check if the message was sent yesterday (in user's local timezone)
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = messageDate.getDate() === yesterday.getDate() &&
+                        messageDate.getMonth() === yesterday.getMonth() &&
+                        messageDate.getFullYear() === yesterday.getFullYear();
+    
+    // Format time using user's local timezone
+    const timeFormatter = new Intl.DateTimeFormat('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false  // Using 24-hour format
+    });
+    
+    const timeString = timeFormatter.format(messageDate);
+    
+    if (isToday) {
+        return `Today at ${timeString}`;
+    } else if (isYesterday) {
+        return `Yesterday at ${timeString}`;
+    } else {
+        // Format date using user's locale
+        const dateFormatter = new Intl.DateTimeFormat('en-US', {  // You can change 'en-US' to user's locale if needed
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+        
+        const dateString = dateFormatter.format(messageDate);
+        return `${dateString} at ${timeString}`;
+    }
 }
 
 
