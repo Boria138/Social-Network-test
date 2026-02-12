@@ -17,9 +17,7 @@ const files = [
     'auth.css',
     'script.js',
     'auth.js',
-    'config.js',
-    'manifest.json',
-    'sw.js'
+    'config.js'
 ];
 
 // Copy files

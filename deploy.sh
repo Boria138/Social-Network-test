@@ -97,6 +97,21 @@ npm install --production
 if [ ! -f .env ]; then
     echo "PORT=3000" > .env
     echo "NODE_ENV=production" >> .env
+else
+    # Если .env существует, убедиться, что PORT установлен
+    if ! grep -q "^PORT=" .env; then
+        echo "PORT=3000" >> .env
+    fi
+fi
+
+# Get PORT from .env file
+if [ -f .env ]; then
+    PORT=$(grep "^PORT=" .env | cut -d'=' -f2)
+    if [ -z "$PORT" ]; then
+        PORT=80
+    fi
+else
+    PORT=80
 fi
 
 # Restart or start server
@@ -109,6 +124,9 @@ else
 fi
 pm2 save
 
+# Открыть порт в firewall
+ufw allow $PORT
+
 echo ""
 echo "========================================="
 echo "Deployed successfully!"
@@ -117,8 +135,14 @@ ENDSSH
 
 rm /tmp/discord-clone.tar.gz
 
+# Получить PORT из .env файла на удаленном сервере
+PORT=$(ssh $SERVER "cd $APP_DIR/server && grep '^PORT=' .env | cut -d'=' -f2")
+if [ -z "$PORT" ]; then
+    PORT=3000
+fi
+
 SERVER_IP=$(echo $SERVER | cut -d'@' -f2)
 echo ""
 echo "========================================="
-echo "Done! Open: http://$SERVER_IP:3000"
+echo "Done! Open: http://$SERVER_IP:$PORT"
 echo "========================================="

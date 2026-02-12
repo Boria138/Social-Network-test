@@ -16,9 +16,9 @@ const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB
 const app = express();
 
 // Check for SSL certificates
-const certPath = process.env.SSL_CERT || '/root/cert/cert.crt';
-const keyPath = process.env.SSL_KEY || '/root/cert/secret.key';
-const useSSL = fs.existsSync(certPath) && fs.existsSync(keyPath);
+const certPath = process.env.SSL_CERT;
+const keyPath = process.env.SSL_KEY;
+const useSSL = certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath);
 
 let server;
 if (useSSL) {
@@ -35,7 +35,7 @@ if (useSSL) {
 
 const io = socketIO(server, {
     cors: {
-        origin: process.env.CLIENT_URL || ['http://localhost:5173', 'http://localhost:3000', 'https://localhost:5173', 'https://localhost:3000'],
+        origin: "*",
         methods: ['GET', 'POST'],
         credentials: true
     }
@@ -83,12 +83,11 @@ async function authenticateToken(req, res, next) {
 }
 
 // Middleware
-const corsOptions = {
-    origin: process.env.CLIENT_URL || ['http://localhost:5173', 'http://localhost:3000'],
+app.use(cors({
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true
-};
-app.use(cors(corsOptions));
+}));
 app.use(express.json());
 
 // Create uploads directory
@@ -735,5 +734,7 @@ if (fs.existsSync(clientDir)) {
 // Start server
 server.listen(PORT, () => {
     const protocol = useSSL ? 'https' : 'http';
-    console.log(`Discord Clone server running on ${protocol}://localhost:${PORT}`);
+    const address = server.address();
+    const host = address.address === '::' || address.address === '0.0.0.0' ? 'localhost' : address.address;
+    console.log(`Discord Clone server running on ${protocol}://${host}:${address.port}`);
 });
