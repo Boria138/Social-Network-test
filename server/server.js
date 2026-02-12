@@ -318,7 +318,9 @@ app.get('/api/dm/:userId', authenticateToken, async (req, res) => {
             return {
                 ...message,
                 reactions: reactions,
-                file: file  // Добавляем информацию о файле, если он есть
+                file: file,  // Добавляем информацию о файле, если он есть
+                edited: message.edited,  // Используем поле edited из базы данных
+                originalContent: message.originalContent  // Добавляем оригинальное содержимое
             };
         }));
 
@@ -549,6 +551,95 @@ io.on('connection', async (socket) => {
             });
         } catch (error) {
             console.error('DM error:', error);
+        }
+    });
+
+    socket.on('update-dm', async (data) => {
+        try {
+            const { messageId, newText, receiverId } = data;
+            
+            // Проверяем, что пользователь является автором сообщения
+            const message = await dmDB.getById(messageId);
+            if (!message || message.sender_id !== socket.userId) {
+                console.error('User trying to update message they did not send');
+                return;
+            }
+            
+            // Обновляем сообщение в базе данных
+            await dmDB.update(messageId, newText);
+
+            // Получаем обновленное сообщение с оригинальным содержимым
+            const updatedMessage = await dmDB.getById(messageId);
+            const sender = await userDB.findById(socket.userId);
+
+            // Get reactions for the updated message
+            const reactions = await reactionDB.getByMessage(messageId);
+
+            const updatedMessagePayload = {
+                id: updatedMessage.id,
+                author: sender.username,
+                avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
+                text: newText,
+                timestamp: updatedMessage.created_at,
+                reactions: reactions,
+                edited: true,  // Помечаем, что сообщение было отредактировано
+                originalContent: updatedMessage.originalContent  // Добавляем оригинальное содержимое
+            };
+
+            // Отправляем обновленное сообщение получателю
+            const receiverSocket = Array.from(users.values())
+                .find(u => u.id === receiverId);
+
+            if (receiverSocket) {
+                io.to(receiverSocket.socketId).emit('updated-dm', {
+                    receiverId: socket.userId,
+                    message: updatedMessagePayload
+                });
+            }
+
+            // Отправляем обновленное сообщение отправителю
+            socket.emit('dm-updated', {
+                receiverId,
+                message: updatedMessagePayload
+            });
+        } catch (error) {
+            console.error('Update DM error:', error);
+        }
+    });
+
+    socket.on('delete-dm', async (data) => {
+        try {
+            const { messageId, receiverId } = data;
+            
+            // Проверяем, что пользователь является автором сообщения
+            const message = await dmDB.getById(messageId);
+            if (!message || message.sender_id !== socket.userId) {
+                console.error('User trying to delete message they did not send');
+                return;
+            }
+            
+            // Удаляем сообщение из базы данных
+            await dmDB.delete(messageId);
+            
+            const sender = await userDB.findById(socket.userId);
+
+            // Отправляем уведомление о удалении получателю
+            const receiverSocket = Array.from(users.values())
+                .find(u => u.id === receiverId);
+
+            if (receiverSocket) {
+                io.to(receiverSocket.socketId).emit('deleted-dm', {
+                    messageId: messageId,
+                    deletedBy: socket.userId
+                });
+            }
+
+            // Отправляем уведомление об удалении отправителю
+            socket.emit('dm-deleted', {
+                messageId: messageId
+            });
+        } catch (error) {
+            console.error('Delete DM error:', error);
         }
     });
 

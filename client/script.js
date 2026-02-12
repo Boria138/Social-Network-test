@@ -21,6 +21,8 @@ let currentView = 'friends';
 let currentDMUserId = null;
 // Переменная для отслеживания текущего режима (мобильный/десктопный)
 let isMobileView = window.innerWidth <= 820;
+// Переменная для отслеживания редактируемого сообщения
+let editingMessageId = null;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     token = localStorage.getItem('token');
@@ -131,7 +133,8 @@ function connectToSocketIO() {
                     text: data.message.text,
                     timestamp: data.message.timestamp,
                     reactions: data.message.reactions || [],
-                    file: data.message.file  // Добавляем информацию о файле, если она есть
+                    file: data.message.file,  // Добавляем информацию о файле, если она есть
+                    edited: data.message.edited  // Добавляем флаг редактирования, если есть
                 });
                 scrollToBottom();
             }
@@ -148,9 +151,39 @@ function connectToSocketIO() {
                     text: data.message.text,
                     timestamp: data.message.timestamp,
                     reactions: data.message.reactions || [],
-                    file: data.message.file  // Добавляем информацию о файле, если она есть
+                    file: data.message.file,  // Добавляем информацию о файле, если она есть
+                    edited: data.message.edited  // Добавляем флаг редактирования, если есть
                 });
                 scrollToBottom();
+            }
+        });
+
+        socket.on('updated-dm', (data) => {
+            // Обновляем сообщение, если оно от пользователя, с которым мы общаемся
+            if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
+                updateMessageInUI({
+                    id: data.message.id,
+                    text: data.message.text,
+                    edited: true  // Всегда помечаем как отредактированное при обновлении
+                });
+            }
+        });
+        
+        socket.on('dm-updated', (data) => {
+            // Обновляем сообщение у отправителя
+            if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
+                updateMessageInUI({
+                    id: data.message.id,
+                    text: data.message.text,
+                    edited: true  // Всегда помечаем как отредактированное при обновлении
+                });
+            }
+        });
+
+        socket.on('deleted-dm', (data) => {
+            // Удаляем сообщение из UI
+            if (currentView === 'dm' && currentDMUserId) {
+                deleteMessageFromUI(data.messageId);
             }
         });
 
@@ -897,6 +930,12 @@ function sendMessage() {
 
     if (text === '') return;
 
+    // Если мы редактируем сообщение, обновляем его вместо создания нового
+    if (editingMessageId) {
+        updateMessage(editingMessageId, text);
+        return;
+    }
+
     const message = {
         id: Date.now(), // используем временную метку как ID
         text: text,
@@ -967,13 +1006,18 @@ function addMessageToUI(message) {
 
     const text = document.createElement('div');
     text.className = 'message-text';
-    
+
     if (isUserMessage) {
         text.classList.add('user-message-text');
     }
 
     // Process the message text to handle quotes
-    const processedText = formatQuotedText(message.text);
+    let processedText = formatQuotedText(message.text);
+    
+    // Add edited indicator if message was edited
+    if (message.edited) {
+        processedText += ' <span class="edited-indicator">(' + (window.i18n ? window.i18n.t('message.edited') : 'edited') + ')</span>';
+    }
 
     // Set the HTML content to display formatted quotes
     text.innerHTML = processedText;
@@ -1199,6 +1243,25 @@ function addMessageToUI(message) {
     // Create a container for action buttons to position them properly
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'message-actions';
+    
+    // Add edit and delete buttons for user's own messages
+    if (isUserMessage) {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'edit-btn';
+        editBtn.textContent = '✏️';  // Pencil emoji for edit
+        editBtn.title = 'Edit message';
+        editBtn.onclick = () => editMessage(message);
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.textContent = '🗑️';  // Trash emoji for delete
+        deleteBtn.title = 'Delete message';
+        deleteBtn.onclick = () => deleteMessage(message.id);
+        
+        actionsContainer.appendChild(editBtn);
+        actionsContainer.appendChild(deleteBtn);
+    }
+    
     actionsContainer.appendChild(replyBtn);
     actionsContainer.appendChild(addReactionBtn);
     reactionsAndActionsContainer.appendChild(actionsContainer);
@@ -1270,6 +1333,127 @@ function replyToMessage(message) {
 
     // Adjust textarea height
     adjustTextareaHeight(messageInput);
+}
+
+// Function to edit a message
+function editMessage(message) {
+    const messageInput = document.getElementById('messageInput');
+
+    if (!messageInput) {
+        console.error('Message input element not found');
+        return;
+    }
+
+    // Put the current message text in the input field
+    messageInput.value = message.text;
+
+    // Focus the input and move cursor to the end
+    messageInput.focus();
+    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+
+    // Adjust textarea height
+    adjustTextareaHeight(messageInput);
+
+    // Store the ID of the message being edited
+    editingMessageId = message.id;
+
+    // Change send button function temporarily (keep the same icon/text)
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) {
+        // Store the original function to restore later
+        sendBtn._originalOnClick = sendBtn.onclick;
+        sendBtn.onclick = () => updateMessage(message.id, messageInput.value);
+    }
+}
+
+// Function to update a message
+function updateMessage(messageId, newText) {
+    if (newText.trim() === '') return;
+
+    // If it's a self chat, update locally
+    if (currentDMUserId === currentUser.id) {
+        updateSelfChatMessageContent(messageId, newText);
+    } else if (currentDMUserId) {
+        // For regular DMs, send update via socket
+        if (socket && socket.connected) {
+            socket.emit('update-dm', {
+                messageId: messageId,
+                newText: newText,
+                receiverId: currentDMUserId
+            });
+        }
+    }
+
+    // Reset the send button
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) {
+        sendBtn.onclick = sendBtn._originalOnClick || (() => sendMessage());
+    }
+
+    // Clear the input
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        adjustTextareaHeight(messageInput);
+    }
+    
+    // Reset the editing message ID
+    editingMessageId = null;
+}
+
+// Function to delete a message
+function deleteMessage(messageId) {
+    if (!confirm('Are you sure you want to delete this message?')) return;
+
+    // Delete from UI immediately
+    deleteMessageFromUI(messageId);
+
+    // If it's a self chat, delete locally
+    if (currentDMUserId === currentUser.id) {
+        deleteSelfChatMessage(messageId);
+    } else if (currentDMUserId) {
+        // For regular DMs, send delete via socket
+        if (socket && socket.connected) {
+            socket.emit('delete-dm', {
+                messageId: messageId,
+                receiverId: currentDMUserId
+            });
+        }
+    }
+}
+
+// Function to update a message in the UI
+function updateMessageInUI(updatedMessage) {
+    const messageElement = document.querySelector(`[data-message-id="${updatedMessage.id}"]`);
+    if (messageElement) {
+        // Find the message text element and update its content
+        const messageTextElement = messageElement.querySelector('.message-text');
+        if (messageTextElement) {
+            // Preserve the original structure but update the text
+            let newTextContent = formatQuotedText(updatedMessage.text);
+            
+            // Add edited indicator if message was edited
+            if (updatedMessage.edited) {
+                newTextContent += ' <span class="edited-indicator">(' + (window.i18n ? window.i18n.t('message.edited') : 'edited') + ')</span>';
+            }
+            
+            messageTextElement.innerHTML = newTextContent;
+            
+            // Re-parse emojis if twemoji is available
+            if (typeof twemoji !== 'undefined') {
+                twemoji.parse(messageTextElement);
+            }
+        }
+    }
+}
+
+// Function to delete a message from the UI
+function deleteMessageFromUI(messageId) {
+    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageElement) {
+        messageElement.remove();
+    }
 }
 
 // Function to handle reply to selected text
@@ -1669,6 +1853,45 @@ function updateSelfChatMessage(messageId, updatedMessage) {
 
         // Добавляем обновленное сообщение
         addMessageToUI(updatedMessage);
+    }
+}
+
+// Функция для обновления содержимого сообщения в Self Chat
+function updateSelfChatMessageContent(messageId, newText) {
+    const key = `selfChatHistory_${currentUser.id}`;
+    const history = JSON.parse(localStorage.getItem(key)) || [];
+
+    const messageIndex = history.findIndex(msg => msg.id === messageId);
+    if (messageIndex !== -1) {
+        // Обновляем текст сообщения
+        history[messageIndex].text = newText;
+        
+        // Обновляем время редактирования
+        history[messageIndex].edited = true;
+
+        // Обновляем историю
+        localStorage.setItem(key, JSON.stringify(history));
+
+        // Обновляем отображение сообщения
+        updateSelfChatMessage(messageId, history[messageIndex]);
+    }
+}
+
+// Функция для удаления сообщения из Self Chat
+function deleteSelfChatMessage(messageId) {
+    const key = `selfChatHistory_${currentUser.id}`;
+    const history = JSON.parse(localStorage.getItem(key)) || [];
+
+    // Фильтруем сообщения, исключая удаляемое
+    const updatedHistory = history.filter(msg => msg.id !== messageId);
+
+    // Обновляем историю
+    localStorage.setItem(key, JSON.stringify(updatedHistory));
+
+    // Удаляем сообщение из интерфейса
+    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageElement) {
+        messageElement.remove();
     }
 }
 
@@ -2120,7 +2343,8 @@ async function loadDMHistory(userId) {
                    text: message.content,
                    timestamp: message.created_at,
                    reactions: message.reactions || [],
-                   file: message.file  // Добавляем информацию о файле, если она есть
+                   file: message.file,  // Добавляем информацию о файле, если она есть
+                   edited: message.edited  // Добавляем флаг редактирования, если он существует
                });
            });
        } else {

@@ -39,6 +39,7 @@ window.I18N = {
     "actions.apply": "Apply",
 
     "chat.message": "Message...",
+    "message.edited": "(edited)",
     "time.todayAt": "Today at",
     "time.yesterdayAt": "Yesterday at",
     "time.dateFormat": "{date} at {time}",
@@ -91,6 +92,7 @@ window.I18N = {
     "actions.apply": "Применить",
 
     "chat.message": "Сообщение...",
+    "message.edited": "(изменено)",
     "time.todayAt": "Сегодня в",
     "time.yesterdayAt": "Вчера в",
     "time.dateFormat": "{date} в {time}",

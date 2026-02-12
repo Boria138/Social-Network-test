@@ -644,6 +644,23 @@ body::after{
     color: var(--text);
 }
 
+.edit-btn, .delete-btn {
+    background: none;
+    border: 1px solid transparent;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 12px;
+    transition: background-color 0.2s;
+    margin-top: 8px;
+    color: var(--muted);
+}
+
+.edit-btn:hover, .delete-btn:hover {
+    background: var(--glass);
+    color: var(--text);
+}
+
 /* Container for reactions and actions */
 .reactions-and-actions-container {
     display: flex;
@@ -981,6 +998,7 @@ body::after{
     width: 24px;
     height: 24px;
 }
+
 
 .call-control-btn.screen-active {
     background: linear-gradient(135deg, rgba(34,197,94,.90), rgba(16,185,129,.75));
@@ -2373,4 +2391,12 @@ body.drawer-open{
 
 .send-btn.ready:hover{
   filter: brightness(1.02);
+}
+
+/* Message editing indicators */
+.edited-indicator {
+    color: var(--muted-2);
+    font-size: 0.75rem;
+    margin-left: 4px;
+    vertical-align: middle;
 }

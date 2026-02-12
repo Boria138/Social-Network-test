@@ -45,6 +45,45 @@ function initializeDatabase() {
                 FOREIGN KEY (receiver_id) REFERENCES users(id)
             )
         `);
+        
+        // Check if updated_at column exists, if not add it
+        db.all("PRAGMA table_info(direct_messages)", (err, rows) => {
+            if (!err) {
+                const hasUpdatedAtColumn = rows.some(row => row.name === 'updated_at');
+                const hasIsEditedColumn = rows.some(row => row.name === 'is_edited');
+                const hasOriginalContentColumn = rows.some(row => row.name === 'original_content');
+
+                if (!hasUpdatedAtColumn) {
+                    db.run("ALTER TABLE direct_messages ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;", (err) => {
+                        if (err) {
+                            console.log("Error adding updated_at column:", err.message);
+                        } else {
+                            console.log("Added updated_at column to direct_messages table");
+                        }
+                    });
+                }
+
+                if (!hasIsEditedColumn) {
+                    db.run("ALTER TABLE direct_messages ADD COLUMN is_edited BOOLEAN DEFAULT FALSE;", (err) => {
+                        if (err) {
+                            console.log("Error adding is_edited column:", err.message);
+                        } else {
+                            console.log("Added is_edited column to direct_messages table");
+                        }
+                    });
+                }
+
+                if (!hasOriginalContentColumn) {
+                    db.run("ALTER TABLE direct_messages ADD COLUMN original_content TEXT;", (err) => {
+                        if (err) {
+                            console.log("Error adding original_content column:", err.message);
+                        } else {
+                            console.log("Added original_content column to direct_messages table");
+                        }
+                    });
+                }
+            }
+        });
 
         // File uploads table
         db.run(`
@@ -216,8 +255,8 @@ const userDB = {
 const dmDB = {
     create: (content, senderId, receiverId) => {
         return new Promise((resolve, reject) => {
-            const sql = 'INSERT INTO direct_messages (content, sender_id, receiver_id) VALUES (?, ?, ?)';
-            db.run(sql, [content, senderId, receiverId], function(err) {
+            const sql = 'INSERT INTO direct_messages (content, original_content, sender_id, receiver_id) VALUES (?, ?, ?, ?)';
+            db.run(sql, [content, content, senderId, receiverId], function(err) {
                 if (err) reject(err);
                 else resolve({ id: this.lastID, content, senderId, receiverId });
             });
@@ -227,17 +266,139 @@ const dmDB = {
     getConversation: (userId1, userId2, limit = 50) => {
         return new Promise((resolve, reject) => {
             const sql = `
-                SELECT dm.*, u.username, u.avatar 
-                FROM direct_messages dm 
-                JOIN users u ON dm.sender_id = u.id 
-                WHERE (dm.sender_id = ? AND dm.receiver_id = ?) 
+                SELECT dm.*, u.username, u.avatar
+                FROM direct_messages dm
+                JOIN users u ON dm.sender_id = u.id
+                WHERE (dm.sender_id = ? AND dm.receiver_id = ?)
                    OR (dm.sender_id = ? AND dm.receiver_id = ?)
-                ORDER BY dm.created_at DESC 
+                ORDER BY dm.created_at DESC
                 LIMIT ?
             `;
             db.all(sql, [userId1, userId2, userId2, userId1, limit], (err, rows) => {
                 if (err) reject(err);
-                else resolve(rows.reverse());
+                else {
+                    // Преобразуем поле is_edited из числа в булевое значение
+                    const processedRows = rows.map(row => ({
+                        ...row,
+                        edited: Boolean(row.is_edited),
+                        originalContent: row.is_edited ? row.original_content : undefined
+                    }));
+                    resolve(processedRows.reverse());
+                }
+            });
+        });
+    },
+
+    getById: (messageId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT *, CASE WHEN is_edited THEN original_content ELSE NULL END AS originalContent FROM direct_messages WHERE id = ?';
+            db.get(sql, [messageId], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    },
+
+    update: (messageId, newContent) => {
+        return new Promise((resolve, reject) => {
+            // Сначала получаем текущее сообщение, чтобы проверить статус is_edited
+            dmDB.getById(messageId)
+                .then(originalMessage => {
+                    // Проверяем наличие столбцов перед обновлением
+                    db.all("PRAGMA table_info(direct_messages)", (err, rows) => {
+                        if (err) {
+                            reject(err);
+                            return;
+                        }
+
+                        const hasUpdatedAtColumn = rows.some(row => row.name === 'updated_at');
+                        const hasIsEditedColumn = rows.some(row => row.name === 'is_edited');
+                        const hasOriginalContentColumn = rows.some(row => row.name === 'original_content');
+
+                        let sql;
+                        if (hasUpdatedAtColumn && hasIsEditedColumn && hasOriginalContentColumn) {
+                            // Если все три столбца существуют
+                            if (!originalMessage.is_edited) {
+                                // Если сообщение еще не редактировалось, устанавливаем original_content
+                                sql = 'UPDATE direct_messages SET content = ?, original_content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?';
+                                db.run(sql, [newContent, originalMessage.content, messageId], (err) => {
+                                    if (err) reject(err);
+                                    else resolve();
+                                });
+                            } else {
+                                // Если сообщение уже редактировалось, просто обновляем content и updated_at
+                                sql = 'UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+                                db.run(sql, [newContent, messageId], (err) => {
+                                    if (err) reject(err);
+                                    else resolve();
+                                });
+                            }
+                        } else if (hasUpdatedAtColumn && hasIsEditedColumn) {
+                            // Если только updated_at и is_edited существуют
+                            sql = 'UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        } else if (hasUpdatedAtColumn) {
+                            // Если только updated_at существует
+                            sql = 'UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        } else if (hasIsEditedColumn) {
+                            // Если только is_edited существует
+                            sql = 'UPDATE direct_messages SET content = ?, is_edited = TRUE WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        } else {
+                            // Если ни один из дополнительных столбцов не существует
+                            sql = 'UPDATE direct_messages SET content = ? WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        }
+                    });
+                })
+                .catch(error => {
+                    reject(error);
+                });
+        });
+    },
+
+    delete: (messageId) => {
+        return new Promise((resolve, reject) => {
+            // Удаляем сначала реакции и файлы, связанные с сообщением
+            const deleteReactionsSql = 'DELETE FROM reactions WHERE message_id = ?';
+            const deleteFilesSql = 'DELETE FROM file_uploads WHERE dm_id = ?';
+            const deleteMessageSql = 'DELETE FROM direct_messages WHERE id = ?';
+            
+            db.serialize(() => {
+                // Удаляем реакции
+                db.run(deleteReactionsSql, [messageId], (err) => {
+                    if (err) {
+                        console.error('Error deleting reactions:', err);
+                        // Продолжаем выполнение даже если возникла ошибка
+                    }
+                    
+                    // Удаляем файлы
+                    db.run(deleteFilesSql, [messageId], (err) => {
+                        if (err) {
+                            console.error('Error deleting files:', err);
+                            // Продолжаем выполнение даже если возникла ошибка
+                        }
+                        
+                        // Удаляем само сообщение
+                        db.run(deleteMessageSql, [messageId], (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                    });
+                });
             });
         });
     },
