@@ -11,8 +11,6 @@
 
 /* ---------------------------
    Theme tokens (Soft Blur)
-   (оставляем имена переменных, но делаем поверхности плотнее,
-   без "стеклянной" прозрачности и без saturate в blur)
 --------------------------- */
 :root{
     --bg-0:#0a0f18;
@@ -40,9 +38,15 @@
 
     --accent: #8b5cf6;   /* violet */
     --accentB: #60a5fa;  /* blue */
-    --accent-transparent: rgba(139, 92, 246, .26);  /* 26% opacity accent */
-    --accentB-transparent: rgba(96, 165, 250, .16); /* 16% opacity accentB */
-    --accent-hover-bg: rgba(139, 92, 246, .26); /* 26% opacity accent for hover */
+    --accent-transparent: rgba(139, 92, 246, .26);
+    --accentB-transparent: rgba(96, 165, 250, .16);
+    --accent-hover-bg: rgba(139, 92, 246, .26);
+
+    /* ✅ ДОБАВЛЕНО: недостающие токены (используются ниже) */
+    --accent-border-focus: rgba(139, 92, 246, .55);
+    --accent-shadow-focus: rgba(139, 92, 246, .18);
+    --accent-reaction-hover: rgba(139, 92, 246, .32);
+
     --good: #22c55e;
     --danger: #ef4444;
 
@@ -52,6 +56,9 @@
     --r-14: 14px;
     --r-16: 16px;
 }
+
+html, body { height: 100%; }
+body { color-scheme: dark; }
 
 /* ---------------------------
    App background scene
@@ -128,7 +135,6 @@ body::after{
     border: 1px solid var(--stroke-soft);
     box-shadow: var(--shadow-soft);
 
-    /* было blur + saturate -> только blur */
     -webkit-backdrop-filter: blur(var(--blur));
     backdrop-filter: blur(var(--blur));
 }
@@ -181,7 +187,6 @@ body::after{
     position: relative;
 }
 
-/* ховер менее “конфетный”, более спокойный */
 .server-icon:hover {
     border-radius: 16px;
     background: var(--accent-hover-bg);
@@ -205,7 +210,7 @@ body::after{
     border: 1px solid rgba(255,255,255,.08);
     box-shadow: 0 10px 22px rgba(0,0,0,.35);
     color: rgba(255,255,255,.82);
-    margin-right: 4px; /* Добавляем отступ справа */
+    margin-right: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -334,11 +339,11 @@ body::after{
 }
 
 .friend-avatar.self-chat-icon .friend-avatar-content {
-    background: linear-gradient(135deg, rgba(255,215,0,.95), rgba(255,140,0,.85)) !important; /* Золотистый цвет для Self Chat */
+    background: linear-gradient(135deg, rgba(255,215,0,.95), rgba(255,140,0,.85)) !important;
 }
 
 .server-icon.friend-avatar-server.self-chat-icon .friend-avatar-content {
-    background: linear-gradient(135deg, rgba(255,215,0,.95), rgba(255,140,0,.85)) !important; /* Золотистый цвет для Self Chat в мобильной версии */
+    background: linear-gradient(135deg, rgba(255,215,0,.95), rgba(255,140,0,.85)) !important;
 }
 
 /* =======================================================
@@ -436,8 +441,8 @@ body::after{
     display: flex;
     flex-direction: column;
 
-    /* было слишком “стекло” */
-    background: rgba(12, 16, 26, .62);
+    /* ✅ ПРИВЕДЕНО К ЕДИНОМУ: без отдельного "случайного" rgba */
+    background: var(--glass-2);
     position: relative;
 }
 
@@ -1152,7 +1157,6 @@ body::after{
     background-color: rgba(0,0,0,.56);
     z-index: 999;
 
-    /* было blur + saturate -> только blur */
     -webkit-backdrop-filter: blur(var(--blur-2));
     backdrop-filter: blur(var(--blur-2));
 }
@@ -1179,10 +1183,6 @@ body::after{
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255,255,255,.20);
 }
-
-/* =======================================================
-   Voice Channel Indicator
-   ======================================================= */
 
 /* =======================================================
    Friends / DM
@@ -1588,7 +1588,6 @@ body::after{
     color: rgba(255,255,255,.55);
 }
 
-
 .add-reaction-btn {
     background: none;
     border: 1px solid transparent;
@@ -1959,7 +1958,6 @@ img.emoji {
 
 /* =======================================================
    Mobile layout pack — bottom servers + left drawer channels
-   Paste at the very end of styles.css
    ======================================================= */
 
 .drawer-overlay{
@@ -1969,9 +1967,8 @@ img.emoji {
     opacity: 0;
     pointer-events: none;
     transition: opacity .22s ease;
-    z-index: 900; /* below channel-list drawer */
+    z-index: 900;
 
-    /* было blur + saturate -> только blur */
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
 }
@@ -1981,27 +1978,23 @@ img.emoji {
     pointer-events: auto;
 }
 
-/* mobile menu button hidden on desktop */
 .mobile-menu-btn{
     display: none;
 }
 
 @media (max-width: 820px){
 
-    /* Body becomes “app-like” with a bottom bar */
     body{
         height: 100dvh;
         overflow: hidden;
     }
 
-    /* MAIN CONTENT takes full width, leaves space for bottom bar */
     .main-content{
         width: 100vw;
         height: calc(100dvh - 64px);
         min-height: calc(100dvh - 64px);
     }
 
-    /* SERVER LIST -> bottom navigation */
     .server-list{
         position: fixed;
         left: 0;
@@ -2024,23 +2017,25 @@ img.emoji {
         border-right: none;
         border-top: 1px solid rgba(255,255,255,.07);
 
-        /* safe area */
         padding-bottom: calc(10px + env(safe-area-inset-bottom));
         height: calc(64px + env(safe-area-inset-bottom));
         z-index: 800;
     }
 
+    /* ✅ ДОБАВЛЕНО: чтобы разделитель реально был видимым */
     .server-separator{
         width: 2px;
         height: 28px;
         border-radius: 999px;
         opacity: .6;
+        background: rgba(255,255,255,.10);
+        flex: 0 0 auto;
     }
 
     .server-icon{
         width: 44px;
         height: 44px;
-        border-radius: 14px; /* mobile-friendly */
+        border-radius: 14px;
         flex: 0 0 auto;
     }
 
@@ -2048,7 +2043,6 @@ img.emoji {
         transform: translateY(-1px);
     }
 
-    /* CHANNEL LIST -> drawer */
     .channel-list{
         position: fixed;
         top: 0;
@@ -2061,7 +2055,7 @@ img.emoji {
         transform: translateX(-110%);
         transition: transform .22s ease;
 
-        z-index: 950; /* above overlay */
+        z-index: 950;
         border-right: 1px solid rgba(255,255,255,.10);
         box-shadow: 0 30px 90px rgba(0,0,0,.65);
     }
@@ -2070,7 +2064,6 @@ img.emoji {
         transform: translateX(0);
     }
 
-    /* Keep user panel always visible at bottom of drawer */
     .channel-list{
         display: flex;
     }
@@ -2082,19 +2075,16 @@ img.emoji {
         padding-bottom: env(safe-area-inset-bottom);
     }
 
-    /* Make headers a bit taller / tappable */
     .server-header,
     .chat-header,
     .friends-header{
         height: 56px;
     }
 
-    /* Show burger only on mobile */
     .mobile-menu-btn{
         display: inline-flex;
     }
 
-    /* Friends tabs: horizontal scroll */
     .friends-tabs{
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -2109,7 +2099,6 @@ img.emoji {
         flex: 0 0 auto;
     }
 
-    /* Messages spacing on small screens */
     .messages{
         padding: 12px;
     }
@@ -2131,7 +2120,6 @@ img.emoji {
         line-height: 1.42;
     }
 
-    /* Input fixed feel: bigger hit targets */
     .message-input-container{
         padding: 10px 12px 12px;
     }
@@ -2144,12 +2132,11 @@ img.emoji {
         padding: 10px 6px;
     }
     #messageInput{
-        font-size: 16px; /* prevents iOS zoom */
+        font-size: 16px;
         padding: 12px 0;
         max-height: 140px;
     }
 
-    /* Emoji picker: full width-ish on phones */
     .emoji-picker-full{
         right: 10px;
         left: 10px;
@@ -2163,7 +2150,6 @@ img.emoji {
         gap: 6px;
     }
 
-    /* Call interface: always fullscreen on mobile */
     .call-interface{
         top: 0;
         left: 0;
@@ -2182,7 +2168,6 @@ img.emoji {
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     }
 
-    /* Better touch scrolling */
     .dm-list-view,
     .messages,
     .friends-content-wrapper,
@@ -2193,7 +2178,6 @@ img.emoji {
     }
 }
 
-/* Smaller phones */
 @media (max-width: 420px){
     .server-list{
         gap: 8px;
@@ -2206,4 +2190,174 @@ img.emoji {
     .emoji-grid{
         grid-template-columns: repeat(7, 1fr);
     }
+}
+
+
+/* =======================================================
+   ✅ Mobile Burger / Drawer — FINAL PATCH (append to end)
+   - correct z-index stacking
+   - smooth drawer + overlay
+   - body lock while open (works with .drawer-open on html/body)
+   - nicer burger button look
+   - iOS safe-area & tap fixes
+   ======================================================= */
+
+/* 1) Body lock when drawer open (JS должен добавлять класс drawer-open) */
+html.drawer-open,
+body.drawer-open{
+  overflow: hidden !important;
+  height: 100%;
+  touch-action: none;           /* блокируем жесты фона */
+  overscroll-behavior: none;
+}
+
+/* 2) Overlay всегда над контентом, но под drawer */
+.drawer-overlay{
+  z-index: 940;                 /* было 900 — поднимем */
+  will-change: opacity;
+}
+
+/* 3) Drawer всегда поверх overlay */
+@media (max-width: 820px){
+  .channel-list{
+    z-index: 950;               /* у тебя так и есть — фиксируем */
+    will-change: transform;
+    /* чуть приятнее инерция */
+    transition: transform .22s cubic-bezier(.2,.9,.2,1);
+  }
+
+  /* чтобы в drawer не было “вылетов” по высоте на iOS */
+  .channel-list,
+  .main-content{
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 4) Кнопка бургера — делаем её реально "кнопкой" */
+  .mobile-menu-btn{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.10);
+    box-shadow: 0 10px 22px rgba(0,0,0,.30);
+
+    cursor: pointer;
+    transition: transform .14s ease, background .14s ease, border-color .14s ease;
+  }
+
+  .mobile-menu-btn:hover{
+    background: rgba(255,255,255,.085);
+    border-color: rgba(255,255,255,.14);
+    transform: translateY(-1px);
+  }
+
+  .mobile-menu-btn:active{
+    transform: translateY(0) scale(.98);
+  }
+
+  /* 5) Чтобы клики не “пробивали” в фоне при закрытом drawer */
+  .channel-list:not(.is-open){
+    pointer-events: none;
+  }
+  .channel-list.is-open{
+    pointer-events: auto;
+  }
+
+  /* 6) Безопасная нижняя зона под сервер-бар на телефоне */
+  .messages{
+    padding-bottom: calc(12px + 64px + env(safe-area-inset-bottom));
+  }
+  .message-input-container{
+    padding-bottom: calc(12px + 64px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 7) Мелкие телефоны — чуть компактнее бургер */
+@media (max-width: 420px){
+  .mobile-menu-btn{
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+}
+
+
+/* FIX: overlay не блокирует клики, когда закрыт */
+.drawer-overlay{
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 999; /* ниже, чем drawer */
+}
+
+.drawer-overlay.is-open{
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* drawer должен быть выше overlay */
+.channel-list.is-open{
+  z-index: 1000;
+}
+
+/* а theme selector — выше всего (чтобы точно кликается) */
+#themeSelector{
+  position: fixed;
+  z-index: 2000;
+}
+
+
+
+.send-btn{
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 14px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  color: rgba(255,255,255,.78);
+
+  cursor: pointer;
+  transition: transform .14s ease, background .14s ease, color .14s ease, box-shadow .14s ease, border-color .14s ease;
+  box-shadow: 0 10px 22px rgba(0,0,0,.25);
+}
+
+.send-btn:hover{
+  background: rgba(255,255,255,.085);
+  color: #fff;
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.14);
+}
+
+.send-btn:active{
+  transform: translateY(0) scale(.98);
+}
+
+.send-btn:disabled{
+  opacity: .45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.send-btn.ready{
+  background: linear-gradient(135deg, var(--accent), var(--accentB));
+  border-color: rgba(255,255,255,.14);
+  color: #fff;
+  box-shadow: 0 16px 34px rgba(0,0,0,.38);
+}
+
+.send-btn.ready:hover{
+  filter: brightness(1.02);
 }

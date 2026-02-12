@@ -1203,47 +1203,35 @@ function addMessageToUI(message) {
 }
 
 function formatTimestamp(date) {
-    // Convert the date to the user's local time zone
     const messageDate = new Date(date);
-    
-    // Use Intl.DateTimeFormat to format the date according to user's locale and timezone
     const now = new Date();
-    
-    // Check if the message was sent today (in user's local timezone)
-    const isToday = messageDate.getDate() === now.getDate() &&
-                    messageDate.getMonth() === now.getMonth() &&
-                    messageDate.getFullYear() === now.getFullYear();
-    
-    // Check if the message was sent yesterday (in user's local timezone)
-    const yesterday = new Date(now);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-    const isYesterday = messageDate.getDate() === yesterday.getDate() &&
-                        messageDate.getMonth() === yesterday.getMonth() &&
-                        messageDate.getFullYear() === yesterday.getFullYear();
+    const messageDay = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate());
     
-    // Format time using user's local timezone
-    const timeFormatter = new Intl.DateTimeFormat('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false  // Using 24-hour format
-    });
+    const hours = messageDate.getHours().toString().padStart(2, '0');
+    const minutes = messageDate.getMinutes().toString().padStart(2, '0');
+    const timeString = `${hours}:${minutes}`;
     
-    const timeString = timeFormatter.format(messageDate);
-    
-    if (isToday) {
-        return `Today at ${timeString}`;
-    } else if (isYesterday) {
-        return `Yesterday at ${timeString}`;
-    } else {
-        // Format date using user's locale
-        const dateFormatter = new Intl.DateTimeFormat('en-US', {  // You can change 'en-US' to user's locale if needed
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-        });
+    // Check if the message is from today
+    if (messageDay.getTime() === today.getTime()) {
+        return `${window.i18n.t('time.todayAt')} ${timeString}`;
+    } 
+    // Check if the message is from yesterday
+    else if (messageDay.getTime() === yesterday.getTime()) {
+        return `${window.i18n.t('time.yesterdayAt')} ${timeString}`;
+    } 
+    // For other dates, format as DD/MM/YYYY at HH:MM
+    else {
+        const day = messageDate.getDate().toString().padStart(2, '0');
+        const month = (messageDate.getMonth() + 1).toString().padStart(2, '0'); // Month is 0-indexed
+        const year = messageDate.getFullYear();
+        const dateString = `${day}/${month}/${year}`;
         
-        const dateString = dateFormatter.format(messageDate);
-        return `${dateString} at ${timeString}`;
+        // Using template replacement for the date format
+        let dateFormat = window.i18n.t('time.dateFormat');
+        return dateFormat.replace('{date}', dateString).replace('{time}', timeString);
     }
 }
 
@@ -3184,3 +3172,288 @@ function updateTransparency(level) {
 
 // Initialize theme system when DOM is loaded
 document.addEventListener('DOMContentLoaded', initializeThemeSystem);
+
+
+
+/* =========================
+   i18n engine (Voxii)
+   - supports: data-i18n, data-i18n-placeholder, data-i18n-title
+   - updates: aria-label optionally, <html lang>, <title>
+   - persists: localStorage("lang")
+   ========================= */
+
+(function(){
+  const STORAGE_KEY = "lang";
+  const FALLBACK_LANG = "en";
+
+  function getDict(lang){
+    const dict = window.I18N || {};
+    return dict[lang] || dict[FALLBACK_LANG] || {};
+  }
+
+  function t(key, lang){
+    const dict = getDict(lang);
+    if (key in dict) return dict[key];
+
+    const fb = getDict(FALLBACK_LANG);
+    if (key in fb) return fb[key];
+
+    return key; // visible missing key
+  }
+
+  function getLang(){
+    const saved = (localStorage.getItem(STORAGE_KEY) || "").toLowerCase();
+    if (saved && window.I18N && window.I18N[saved]) return saved;
+
+    const nav = (navigator.language || "").slice(0,2).toLowerCase();
+    if (nav && window.I18N && window.I18N[nav]) return nav;
+
+    return FALLBACK_LANG;
+  }
+
+  function setLang(lang){
+    lang = (lang || "").toLowerCase();
+    if (!window.I18N || !window.I18N[lang]) lang = FALLBACK_LANG;
+
+    localStorage.setItem(STORAGE_KEY, lang);
+    window.APP_LANG = lang;
+
+    applyI18n(document, lang);
+    updateLangButtons(lang);
+
+    // if you render dynamic lists later, you can call this again after render
+    // applyI18n(dmListContainer, lang)
+  }
+
+  function applyI18n(root = document, lang = getLang()){
+    const html = document.documentElement;
+    html.setAttribute("lang", lang);
+
+    // Title + app title key
+    document.title = t("app.title", lang) || "Voxii";
+
+    // [data-i18n] => textContent
+    root.querySelectorAll("[data-i18n]").forEach(el => {
+      const key = el.getAttribute("data-i18n");
+      if (!key) return;
+      el.textContent = t(key, lang);
+    });
+
+    // [data-i18n-placeholder] => placeholder
+    root.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+      const key = el.getAttribute("data-i18n-placeholder");
+      if (!key) return;
+      el.setAttribute("placeholder", t(key, lang));
+    });
+
+    // [data-i18n-title] => title (and aria-label if it matches old title)
+    root.querySelectorAll("[data-i18n-title]").forEach(el => {
+      const key = el.getAttribute("data-i18n-title");
+      if (!key) return;
+      const val = t(key, lang);
+      const oldTitle = el.getAttribute("title");
+      el.setAttribute("title", val);
+
+      // optional: keep aria-label in sync when it was same as title or empty
+      const oldAria = el.getAttribute("aria-label");
+      if (!oldAria || oldAria === oldTitle) el.setAttribute("aria-label", val);
+    });
+  }
+
+  function updateLangButtons(lang){
+    const ruBtn = document.getElementById("langRuBtn");
+    const enBtn = document.getElementById("langEnBtn");
+    if (ruBtn) ruBtn.classList.toggle("active", lang === "ru");
+    if (enBtn) enBtn.classList.toggle("active", lang === "en");
+
+    // optional: visual hint via aria-pressed
+    if (ruBtn) ruBtn.setAttribute("aria-pressed", String(lang === "ru"));
+    if (enBtn) enBtn.setAttribute("aria-pressed", String(lang === "en"));
+  }
+
+  function bindLangButtons(){
+    const ruBtn = document.getElementById("langRuBtn");
+    const enBtn = document.getElementById("langEnBtn");
+
+    if (ruBtn) ruBtn.addEventListener("click", () => setLang("ru"));
+    if (enBtn) enBtn.addEventListener("click", () => setLang("en"));
+  }
+
+  // expose small API
+  window.i18n = { t, getLang, setLang, applyI18n };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    bindLangButtons();
+    setLang(getLang()); // applies + persists + highlights
+  });
+})();
+
+
+/* =========================
+   Mobile burger / drawer — matches your CSS (.is-open)
+   Uses:
+   - #drawerOverlay (.drawer-overlay.is-open)
+   - #channelList (.channel-list.is-open)
+   - #mobileMenuBtnChat, #mobileMenuBtnFriends
+   Also uses:
+   - html/body .drawer-open (body lock)
+   ========================= */
+
+(function(){
+  const BP = 820;
+
+  const $ = (id) => document.getElementById(id);
+
+  function isMobile(){
+    return window.innerWidth <= BP;
+  }
+
+  function openDrawer(){
+    const drawer = $("channelList");
+    const overlay = $("drawerOverlay");
+    if (!drawer || !overlay) return;
+
+    document.documentElement.classList.add("drawer-open");
+    document.body.classList.add("drawer-open");
+
+    drawer.classList.add("is-open");
+    overlay.classList.add("is-open");
+    overlay.setAttribute("aria-hidden", "false");
+  }
+
+  function closeDrawer(){
+    const drawer = $("channelList");
+    const overlay = $("drawerOverlay");
+    if (!drawer || !overlay) return;
+
+    drawer.classList.remove("is-open");
+    overlay.classList.remove("is-open");
+    overlay.setAttribute("aria-hidden", "true");
+
+    document.documentElement.classList.remove("drawer-open");
+    document.body.classList.remove("drawer-open");
+  }
+
+  function toggleDrawer(){
+    const drawer = $("channelList");
+    if (!drawer) return;
+    drawer.classList.contains("is-open") ? closeDrawer() : openDrawer();
+  }
+
+  function bind(){
+    const btnChat = $("mobileMenuBtnChat");
+    const btnFriends = $("mobileMenuBtnFriends");
+    const overlay = $("drawerOverlay");
+
+    const onBurger = (e) => {
+      if (!isMobile()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleDrawer();
+    };
+
+    if (btnChat) btnChat.addEventListener("click", onBurger);
+    if (btnFriends) btnFriends.addEventListener("click", onBurger);
+
+    if (overlay){
+      overlay.addEventListener("click", (e) => {
+        e.preventDefault();
+        closeDrawer();
+      });
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeDrawer();
+    });
+
+    window.addEventListener("resize", () => {
+      if (!isMobile()) closeDrawer();
+    });
+
+    // optional: close when user taps a DM/channel item inside drawer
+    const drawer = $("channelList");
+    if (drawer){
+      drawer.addEventListener("click", (e) => {
+        if (!isMobile()) return;
+        const item = e.target.closest(".channel, .dm-item, .dm-entry, [role='listitem']");
+        if (item) closeDrawer();
+      });
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", bind);
+  window.VoxiiDrawer = { openDrawer, closeDrawer, toggleDrawer };
+})();
+
+
+
+
+/* =========================
+   Send button + enter behavior
+   - Enter: send
+   - Shift+Enter: newline
+   - Button enabled only when text exists
+   ========================= */
+
+(function(){
+  function getEl(id){ return document.getElementById(id); }
+
+  function updateSendState(){
+    const input = getEl("messageInput");
+    const btn = getEl("sendBtn");
+    if (!input || !btn) return;
+
+    const hasText = input.value.trim().length > 0;
+    btn.disabled = !hasText;
+    btn.classList.toggle("ready", hasText);
+  }
+
+  function trySend(){
+    const input = getEl("messageInput");
+    if (!input) return;
+
+    const text = input.value.trim();
+    if (!text) return;
+
+    // ✅ ВАЖНО:
+    // Подключи сюда твою реальную отправку.
+    // Если у тебя уже есть функция sendMessage(), используй её.
+    if (typeof window.sendMessage === "function") {
+      window.sendMessage(text);
+    } else if (typeof window.handleSendMessage === "function") {
+      window.handleSendMessage(text);
+    } else if (typeof sendMessage === "function") {
+      sendMessage(text);
+    } else {
+      console.warn("No sendMessage() handler found. Hook it here.");
+    }
+
+    input.value = "";
+    updateSendState();
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const input = getEl("messageInput");
+    const btn = getEl("sendBtn");
+    if (!input || !btn) return;
+
+    input.addEventListener("input", updateSendState);
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        trySend();
+      }
+    });
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      trySend();
+    });
+
+    updateSendState();
+  });
+
+  // export if you want
+  window.VoxiiSend = { trySend, updateSendState };
+})();
