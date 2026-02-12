@@ -19,16 +19,18 @@ let socket = null;
 let token = null;
 let currentView = 'friends';
 let currentDMUserId = null;
+// Переменная для отслеживания текущего режима (мобильный/десктопный)
+let isMobileView = window.innerWidth <= 820;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     token = localStorage.getItem('token');
     const userStr = localStorage.getItem('currentUser');
-    
+
     if (!token || !userStr) {
         window.location.replace('login.html');
         return;
     }
-    
+
     try {
         currentUser = JSON.parse(userStr);
         initializeApp();
@@ -39,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.replace('login.html');
     }
 });
+
 
 function initializeApp() {
     updateUserInfo();
@@ -88,10 +91,10 @@ function showNotification(title, body) {
 }
 
 function updateUserInfo() {
-    const userAvatar = document.querySelector('.user-avatar');
+    const userAvatarContent = document.querySelector('.user-avatar .user-avatar-content');
     const username = document.querySelector('.username');
-    
-    if (userAvatar) userAvatar.textContent = currentUser.avatar;
+
+    if (userAvatarContent) userAvatarContent.textContent = currentUser.avatar;
     if (username) username.textContent = currentUser.username;
 }
 
@@ -247,10 +250,31 @@ async function loadFriends() {
         const friends = await response.json();
         displayFriends(friends);
         populateDMList(friends);
+        updateServerListWithFriends(friends); // Добавляем друзей в server-list для мобильной версии
     } catch (error) {
         console.error('Error loading friends:', error);
     }
 }
+
+// Добавляем обработчик изменения размера окна для обновления отображения друзей
+window.addEventListener('resize', () => {
+    const currentIsMobile = window.innerWidth <= 820;
+    
+    // Обновляем отображение только если режим изменился
+    if (isMobileView !== currentIsMobile) {
+        isMobileView = currentIsMobile;
+        
+        if (currentIsMobile) {
+            // Если перешли в мобильный режим, обновляем server-list
+            loadFriends();
+        } else {
+            // Если перешли в десктопный режим, очищаем server-list от аватаров друзей
+            const serverList = document.querySelector('.server-list');
+            const existingFriendAvatars = serverList.querySelectorAll('.friend-avatar-server');
+            existingFriendAvatars.forEach(avatar => avatar.remove());
+        }
+    }
+});
 
 function displayFriends(friends) {
     const onlineList = document.getElementById('friendsOnline');
@@ -283,9 +307,11 @@ function displayFriends(friends) {
 function createFriendItem(friend) {
     const div = document.createElement('div');
     div.className = 'friend-item';
-    
+
     div.innerHTML = `
-        <div class="friend-avatar">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+        <div class="friend-avatar">
+            <div class="friend-avatar-content">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+        </div>
         <div class="friend-info">
             <div class="friend-name">${friend.username}</div>
             <div class="friend-status ${friend.status === 'Online' ? '' : 'offline'}">${friend.status}</div>
@@ -302,7 +328,7 @@ function createFriendItem(friend) {
     div.querySelector('.audio-call').addEventListener('click', () => initiateCall(friend.id, 'audio'));
     div.querySelector('.video-call').addEventListener('click', () => initiateCall(friend.id, 'video'));
     div.querySelector('.remove').addEventListener('click', () => removeFriend(friend.id));
-    
+
     return div;
 }
 
@@ -343,7 +369,9 @@ function displaySearchResults(users) {
         div.className = 'user-search-item';
         
         div.innerHTML = `
-            <div class="user-avatar">${user.avatar || user.username.charAt(0).toUpperCase()}</div>
+            <div class="user-avatar">
+                <div class="user-avatar-content">${user.avatar || user.username.charAt(0).toUpperCase()}</div>
+            </div>
             <div class="user-info">
                 <div class="user-name">${user.username}</div>
             </div>
@@ -397,7 +425,9 @@ async function loadPendingRequests() {
             div.className = 'friend-item';
             
             div.innerHTML = `
-                <div class="friend-avatar">${request.avatar || request.username.charAt(0).toUpperCase()}</div>
+                <div class="friend-avatar">
+                    <div class="friend-avatar-content">${request.avatar || request.username.charAt(0).toUpperCase()}</div>
+                </div>
                 <div class="friend-info">
                     <div class="friend-name">${request.username}</div>
                     <div class="friend-status">Incoming Friend Request</div>
@@ -456,13 +486,13 @@ window.rejectFriendRequest = async function(friendId) {
 
 window.removeFriend = async function(friendId) {
     if (!confirm('Are you sure you want to remove this friend?')) return;
-    
+
     try {
         const response = await fetch(`/api/friends/${friendId}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
         });
-        
+
         if (response.ok) {
             loadFriends();
         }
@@ -470,6 +500,57 @@ window.removeFriend = async function(friendId) {
         console.error('Error removing friend:', error);
     }
 };
+
+// Обновляем server-list аватарами друзей (только для мобильной верстки)
+function updateServerListWithFriends(friends) {
+    // Проверяем, является ли текущая версия мобильной (по ширине окна)
+    if (window.innerWidth <= 820) {
+        const serverList = document.querySelector('.server-list');
+        
+        // Очищаем предыдущие аватары друзей, кроме friendsBtn
+        const existingFriendAvatars = serverList.querySelectorAll('.friend-avatar-server');
+        existingFriendAvatars.forEach(avatar => avatar.remove());
+        
+        // Добавляем аватар Self Chat (копируем структуру friend-avatar из dmListView)
+        const selfChatAvatar = document.createElement('div');
+        selfChatAvatar.className = 'server-icon friend-avatar-server self-chat-icon';
+        selfChatAvatar.title = 'Self Chat';
+        
+        // Используем ту же структуру, что и в createFriendItem
+        selfChatAvatar.innerHTML = `
+            <div class="friend-avatar-content">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+        `;
+        selfChatAvatar.addEventListener('click', startSelfChat);
+        
+        // Вставляем Self Chat аватар сразу после friendsBtn
+        const friendsBtn = document.getElementById('friendsBtn');
+        if (friendsBtn) {
+            serverList.insertBefore(selfChatAvatar, friendsBtn.nextSibling);
+        } else {
+            serverList.appendChild(selfChatAvatar);
+        }
+        
+        // Добавляем аватары друзей в server-list после friendsBtn и selfChat
+        friends.forEach(friend => {
+            const friendAvatar = document.createElement('div');
+            friendAvatar.className = 'server-icon friend-avatar-server';
+            friendAvatar.title = friend.username;
+            
+            // Используем ту же структуру, что и в createFriendItem
+            friendAvatar.innerHTML = `
+                <div class="friend-avatar-content">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+            `;
+            
+            // Добавляем обработчик клика для открытия DM с другом
+            friendAvatar.addEventListener('click', () => {
+                startDM(friend.id, friend.username);
+            });
+            
+            // Вставляем аватар после selfChat
+            serverList.appendChild(friendAvatar);
+        });
+    }
+}
 
 // Initiate call function
 async function initiateCall(friendId, type) {
@@ -660,7 +741,9 @@ window.startDM = async function(friendId, friendUsername) {
     const chatHeaderInfo = document.getElementById('chatHeaderInfo');
     if (chatHeaderInfo) {
         chatHeaderInfo.innerHTML = `
-            <div class="friend-avatar">${friendUsername.charAt(0).toUpperCase()}</div>
+            <div class="friend-avatar">
+                <div class="friend-avatar-content">${friendUsername.charAt(0).toUpperCase()}</div>
+            </div>
             <span class="channel-name">${friendUsername}</span>
         `;
     }
@@ -689,7 +772,9 @@ function startSelfChat() {
     const chatHeaderInfo = document.getElementById('chatHeaderInfo');
     if (chatHeaderInfo) {
         chatHeaderInfo.innerHTML = `
-            <div class="friend-avatar">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+            <div class="friend-avatar">
+                <div class="friend-avatar-content">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+            </div>
             <span class="channel-name">Self Chat</span>
         `;
     }
@@ -2030,7 +2115,9 @@ function populateDMList(friends) {
    selfChatItem.className = 'channel';
    selfChatItem.setAttribute('data-dm-id', 'self');
    selfChatItem.innerHTML = `
-       <div class="friend-avatar self-chat-icon">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+       <div class="friend-avatar self-chat-icon">
+           <div class="friend-avatar-content">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
+       </div>
        <span>Self Chat</span>
    `;
    selfChatItem.addEventListener('click', () => {
@@ -2051,7 +2138,9 @@ function populateDMList(friends) {
        dmItem.className = 'channel';
        dmItem.setAttribute('data-dm-id', friend.id);
        dmItem.innerHTML = `
-           <div class="friend-avatar">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+           <div class="friend-avatar">
+               <div class="friend-avatar-content">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+           </div>
            <span>${friend.username}</span>
        `;
        dmItem.addEventListener('click', () => {
