@@ -936,8 +936,16 @@ function addMessageToUI(message) {
     }
 
     const messageGroup = document.createElement('div');
+    
     messageGroup.className = 'message-group';
     messageGroup.setAttribute('data-message-id', message.id || Date.now());
+    
+    // Проверяем, является ли сообщение отправленным текущим пользователем
+    // Исключаем self chat, так как все сообщения там от текущего пользователя
+    const isUserMessage = message.author === currentUser.username && currentDMUserId !== currentUser.id;
+    if (isUserMessage) {
+        messageGroup.classList.add('user-message');
+    }
 
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
@@ -959,6 +967,10 @@ function addMessageToUI(message) {
 
     const text = document.createElement('div');
     text.className = 'message-text';
+    
+    if (isUserMessage) {
+        text.classList.add('user-message-text');
+    }
 
     // Process the message text to handle quotes
     const processedText = formatQuotedText(message.text);
