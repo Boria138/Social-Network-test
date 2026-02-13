@@ -43,7 +43,8 @@ window.I18N = {
     "time.todayAt": "Today at",
     "time.yesterdayAt": "Yesterday at",
     "time.dateFormat": "{date} at {time}",
-    
+    "chat.selfChat": "Self Chat",
+
     // Theme related translations
     "theme.title": "Theme Settings",
     "theme.custom_color": "Custom Color",
@@ -96,7 +97,8 @@ window.I18N = {
     "time.todayAt": "Сегодня в",
     "time.yesterdayAt": "Вчера в",
     "time.dateFormat": "{date} в {time}",
-    
+    "chat.selfChat": "Личный чат",
+
     // Theme related translations
     "theme.title": "Настройки темы",
     "theme.custom_color": "Пользовательский цвет",

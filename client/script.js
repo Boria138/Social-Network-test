@@ -547,7 +547,7 @@ function updateServerListWithFriends(friends) {
         // Добавляем аватар Self Chat (копируем структуру friend-avatar из dmListView)
         const selfChatAvatar = document.createElement('div');
         selfChatAvatar.className = 'server-icon friend-avatar-server self-chat-icon';
-        selfChatAvatar.title = 'Self Chat';
+        selfChatAvatar.title = window.i18n.t('chat.selfChat');
         
         // Используем ту же структуру, что и в createFriendItem
         selfChatAvatar.innerHTML = `
@@ -808,8 +808,11 @@ function startSelfChat() {
             <div class="friend-avatar">
                 <div class="friend-avatar-content">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
             </div>
-            <span class="channel-name">Self Chat</span>
+            <span class="channel-name" data-i18n="chat.selfChat">Self Chat</span>
         `;
+        
+        // Применяем локализацию к обновленному элементу
+        window.i18n.applyI18n(chatHeaderInfo);
     }
 
     const messageInput = document.getElementById('messageInput');
@@ -2380,12 +2383,15 @@ function populateDMList(friends) {
        <div class="friend-avatar self-chat-icon">
            <div class="friend-avatar-content">${currentUser.avatar || currentUser.username.charAt(0).toUpperCase()}</div>
        </div>
-       <span>Self Chat</span>
+       <span data-i18n="chat.selfChat">Self Chat</span>
    `;
    selfChatItem.addEventListener('click', () => {
        startSelfChat();
    });
    dmList.appendChild(selfChatItem);
+   
+   // Применяем локализацию к новому элементу
+   window.i18n.applyI18n(selfChatItem);
 
    if (friends.length === 0) {
        const emptyDM = document.createElement('div');
