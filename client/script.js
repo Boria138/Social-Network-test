@@ -19,6 +19,8 @@ let socket = null;
 let token = null;
 let currentView = 'friends';
 let currentDMUserId = null;
+// Store user information by socketId
+let users = new Map();
 // Переменная для отслеживания текущего режима (мобильный/десктопный)
 let isMobileView = window.innerWidth <= 820;
 // Переменная для отслеживания редактируемого сообщения
@@ -203,11 +205,25 @@ function connectToSocketIO() {
             console.log('Call accepted by:', data.from);
             // When call is accepted, create peer connection
             document.querySelector('.call-channel-name').textContent = `Connected with ${data.from.username}`;
-            
-            // Create peer connection as initiator
+
+            // Create peer connection - для инициатора вызова создаем как инициатора, для принимающего - как не-инициатора
             if (!peerConnections[data.from.socketId]) {
-                createPeerConnection(data.from.socketId, true);
+                // Определяем, является ли текущий пользователь инициатором вызова
+                const isInitiator = window.currentCallDetails && window.currentCallDetails.isInitiator;
+                createPeerConnection(data.from.socketId, isInitiator);
             }
+        });
+        
+        // Обработка присоединения к существующему звонку
+        socket.on('join-existing-call', (data) => {
+            const { callId, participants, type } = data;
+            console.log('Joining existing call:', callId);
+            
+            // Присоединяемся к существующему звонку
+            joinExistingCall({
+                id: participants.find(id => id !== currentUser.id), // Находим другого участника
+                username: 'Participant' // Временное имя, нужно получить настоящее
+            }, callId, type);
         });
 
         socket.on('call-rejected', (data) => {
@@ -230,10 +246,54 @@ function connectToSocketIO() {
             }
             const remoteVideo = document.getElementById(`remote-${data.from}`);
             if (remoteVideo) remoteVideo.remove();
-            
+
             // If no more connections, end the call
             if (Object.keys(peerConnections).length === 0) {
                 leaveVoiceChannel(true);
+            }
+        });
+        
+        // Обновляем список пользователей
+        socket.on('user-list-update', (usersList) => {
+            // Update online friends list
+            const onlineList = document.getElementById('friendsOnline');
+            if (onlineList) {
+                onlineList.innerHTML = '';
+                
+                const onlineFriends = usersList.filter(f => f.status === 'Online');
+                
+                if (onlineFriends.length === 0) {
+                    onlineList.innerHTML = '<div class="friends-empty">No one is online</div>';
+                } else {
+                    onlineFriends.forEach(friend => {
+                        onlineList.appendChild(createFriendItem(friend));
+                    });
+                }
+            }
+            
+            // Update our local users map
+            users.clear();
+            usersList.forEach(user => {
+                users.set(user.socketId, user);
+            });
+        });
+        
+        // Обработка приглашения присоединиться к звонку
+        socket.on('call-invitation', (data) => {
+            const { inviter, callId, type } = data;
+            showCallInvitation(inviter, callId, type);
+        });
+        
+        // Обработка добавления к существующему звонку
+        socket.on('add-participant-to-call', (data) => {
+            const { from, participants } = data;
+            // Обновляем список участников
+            if (window.currentCallDetails) {
+                window.currentCallDetails.participants = participants;
+            }
+            // Создаем соединение с инициатором
+            if (!peerConnections[from.socketId]) {
+                createPeerConnection(from.socketId, false); // не инициатор
             }
         });
     }
@@ -588,37 +648,43 @@ function updateServerListWithFriends(friends) {
 // Initiate call function
 async function initiateCall(friendId, type) {
     try {
+        // Если звонок уже активен, добавляем нового участника к существующему звонку
+        if (inCall && window.currentCallDetails) {
+            return addParticipantToCall(friendId, type);
+        }
+
         // Always request both video and audio, but disable video if it's audio call
         const constraints = { video: true, audio: true };
-        
+
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        
+
         // If audio call, disable video track initially
         if (type === 'audio') {
             localStream.getVideoTracks().forEach(track => {
                 track.enabled = false;
             });
         }
-        
+
         // Show call interface
         const callInterface = document.getElementById('callInterface');
         callInterface.classList.remove('hidden');
-        
+
         // Update call header
         document.querySelector('.call-channel-name').textContent = `Calling...`;
-        
+
         // Set local video
         const localVideo = document.getElementById('localVideo');
         localVideo.srcObject = localStream;
-        
+
         // Store call details
         window.currentCallDetails = {
             friendId: friendId,
             type: type,
             isInitiator: true,
-            originalType: type
+            originalType: type,
+            participants: [] // Список участников звонка
         };
-        
+
         // Emit call request via socket
         if (socket && socket.connected) {
             socket.emit('initiate-call', {
@@ -631,23 +697,90 @@ async function initiateCall(friendId, type) {
                 }
             });
         }
-        
+
         inCall = true;
         isVideoEnabled = type === 'video';
         isAudioEnabled = true;
         updateCallButtons();
-        
+
         // Initialize resizable functionality after a short delay
         setTimeout(() => {
             if (typeof initializeResizableVideos === 'function') {
                 initializeResizableVideos();
             }
         }, 100);
-        
+
     } catch (error) {
         console.error('Error initiating call:', error);
         alert('Failed to access camera/microphone. Please check permissions.');
     }
+}
+
+// Функция для добавления участника к существующему звонку
+async function addParticipantToCall(friendId, type) {
+    try {
+        // Получаем данные о пользователе
+        const response = await fetch(`${getApiUrl()}/api/users`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const users = await response.json();
+        const friend = users.find(u => u.id == friendId);
+
+        if (!friend) {
+            console.error('Friend not found');
+            return;
+        }
+
+        // Создаем новое peer-соединение для участника
+        const socketId = getSocketIdByUserId(friendId); // Нужно реализовать функцию получения socketId по userId
+        if (socketId) {
+            // Создаем peer-соединение с новым участником
+            if (!peerConnections[socketId]) {
+                createPeerConnection(socketId, true); // initiator
+                
+                // Обновляем список участников
+                if (window.currentCallDetails && !window.currentCallDetails.participants.includes(friendId)) {
+                    window.currentCallDetails.participants.push(friendId);
+                }
+                
+                // Уведомляем нового участника о присоединении к звонку
+                socket.emit('add-participant-to-call', {
+                    to: socketId,
+                    type: type,
+                    from: {
+                        id: currentUser.id,
+                        username: currentUser.username,
+                        socketId: socket.id
+                    },
+                    participants: window.currentCallDetails.participants
+                });
+            }
+        } else {
+            // Если пользователь оффлайн, отправляем ему приглашение
+            socket.emit('invite-to-call', {
+                to: friendId,
+                callId: window.currentCallDetails ? window.currentCallDetails.friendId : null,
+                type: type,
+                inviter: {
+                    id: currentUser.id,
+                    username: currentUser.username
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error adding participant to call:', error);
+    }
+}
+
+// Вспомогательная функция для получения socketId по userId
+function getSocketIdByUserId(userId) {
+    // Используем глобальный объект users
+    for (let [socketId, userData] of users.entries()) {
+        if (userData.id == userId) {
+            return socketId;
+        }
+    }
+    return null;
 }
 
 // Show incoming call notification
@@ -655,26 +788,26 @@ function showIncomingCall(caller, type) {
     const incomingCallDiv = document.getElementById('incomingCall');
     const callerName = incomingCallDiv.querySelector('.caller-name');
     const callerAvatar = incomingCallDiv.querySelector('.caller-avatar');
-    
+
     callerName.textContent = caller.username || 'Unknown User';
     callerAvatar.textContent = caller.avatar || caller.username?.charAt(0).toUpperCase() || 'U';
-    
+
     incomingCallDiv.classList.remove('hidden');
-    
+
     // Set up accept/reject handlers
     const acceptBtn = document.getElementById('acceptCallBtn');
     const rejectBtn = document.getElementById('rejectCallBtn');
-    
+
     acceptBtn.onclick = async () => {
         incomingCallDiv.classList.add('hidden');
         await acceptCall(caller, type);
     };
-    
+
     rejectBtn.onclick = () => {
         incomingCallDiv.classList.add('hidden');
         rejectCall(caller);
     };
-    
+
     // Auto-reject after 30 seconds
     setTimeout(() => {
         if (!incomingCallDiv.classList.contains('hidden')) {
@@ -682,6 +815,110 @@ function showIncomingCall(caller, type) {
             rejectCall(caller);
         }
     }, 30000);
+}
+
+// Show call invitation notification
+function showCallInvitation(inviter, callId, type) {
+    const invitationDiv = document.getElementById('incomingCall') || createCallInvitationElement();
+    const callerName = invitationDiv.querySelector('.caller-name');
+    const callerAvatar = invitationDiv.querySelector('.caller-avatar');
+
+    callerName.textContent = `${inviter.username} invited you to join a call`;
+    callerAvatar.textContent = inviter.avatar || inviter.username?.charAt(0).toUpperCase() || 'U';
+
+    invitationDiv.classList.remove('hidden');
+
+    // Set up join/cancel handlers
+    const acceptBtn = document.getElementById('acceptCallBtn');
+    const rejectBtn = document.getElementById('rejectCallBtn');
+
+    acceptBtn.onclick = async () => {
+        invitationDiv.classList.add('hidden');
+        // Присоединяемся к существующему звонку
+        await joinExistingCall(inviter, callId, type);
+    };
+
+    rejectBtn.onclick = () => {
+        invitationDiv.classList.add('hidden');
+    };
+}
+
+// Create call invitation element if it doesn't exist
+function createCallInvitationElement() {
+    const invitationDiv = document.createElement('div');
+    invitationDiv.id = 'incomingCall';
+    invitationDiv.className = 'incoming-call hidden';
+    invitationDiv.innerHTML = `
+        <div class="caller-info">
+            <div class="caller-avatar"></div>
+            <div class="caller-name"></div>
+        </div>
+        <div class="call-actions">
+            <button id="acceptCallBtn">Join</button>
+            <button id="rejectCallBtn">Cancel</button>
+        </div>
+    `;
+    document.body.appendChild(invitationDiv);
+    return invitationDiv;
+}
+
+// Join existing call
+async function joinExistingCall(inviter, callId, type) {
+    try {
+        // Always request both video and audio
+        const constraints = { video: true, audio: true };
+
+        // Если у нас уже есть локальный поток, используем его
+        if (!localStream) {
+            localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            // If audio call, disable video track initially
+            if (type === 'audio') {
+                localStream.getVideoTracks().forEach(track => {
+                    track.enabled = false;
+                });
+            }
+        }
+
+        // Show call interface
+        const callInterface = document.getElementById('callInterface');
+        callInterface.classList.remove('hidden');
+
+        document.querySelector('.call-channel-name').textContent = `Joined call with ${inviter.username || 'Participant'}`;
+
+        const localVideo = document.getElementById('localVideo');
+        localVideo.srcObject = localStream;
+
+        // Store call details
+        window.currentCallDetails = {
+            callId: callId,
+            type: type,
+            isInitiator: false,
+            originalType: type,
+            participants: [inviter.id] // Инициализируем списком участников
+        };
+
+        // Создаем соединение с инициатором звонка
+        if (inviter.socketId && !peerConnections[inviter.socketId]) {
+            createPeerConnection(inviter.socketId, false);
+        }
+
+        inCall = true;
+        isVideoEnabled = type === 'video';
+        isAudioEnabled = true;
+        updateCallButtons();
+
+        // Initialize resizable functionality after a short delay
+        setTimeout(() => {
+            if (typeof initializeResizableVideos === 'function') {
+                initializeResizableVideos();
+            }
+        }, 100);
+
+    } catch (error) {
+        console.error('Error joining call:', error);
+        alert('Failed to access camera/microphone. Please check permissions.');
+    }
 }
 
 // Accept incoming call
@@ -713,7 +950,8 @@ async function acceptCall(caller, type) {
             peerId: caller.socketId,
             type: type,
             isInitiator: false,
-            originalType: type
+            originalType: type,
+            participants: [caller.id] // Добавляем инициатора в список участников
         };
         
         if (socket && socket.connected) {
@@ -737,6 +975,18 @@ async function acceptCall(caller, type) {
             createPeerConnection(caller.socketId, false);
         }
         
+        // Notify the caller that the call was accepted
+        if (socket && socket.connected) {
+            socket.emit('accept-call', {
+                to: caller.socketId,
+                from: {
+                    id: currentUser.id,
+                    username: currentUser.username,
+                    socketId: socket.id
+                }
+            });
+        }
+        
         // Initialize resizable functionality after a short delay
         setTimeout(() => {
             if (typeof initializeResizableVideos === 'function') {
@@ -754,6 +1004,12 @@ async function acceptCall(caller, type) {
 function rejectCall(caller) {
     if (socket && socket.connected) {
         socket.emit('reject-call', { to: caller.socketId });
+    }
+    
+    // Скрываем интерфейс входящего звонка
+    const incomingCallDiv = document.getElementById('incomingCall');
+    if (incomingCallDiv) {
+        incomingCallDiv.classList.add('hidden');
     }
 }
 
@@ -2115,6 +2371,8 @@ function initializeCallControls() {
                     }
                 });
             }
+            // Leave the voice channel and clean up resources
+            leaveVoiceChannel();
         });
     }
 
@@ -2134,6 +2392,17 @@ function initializeCallControls() {
         toggleScreenBtn.addEventListener('click', () => {
             toggleScreenShare();
         });
+        
+        // Обновляем подсказку для кнопки в зависимости от устройства
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile) {
+            toggleScreenBtn.title = 'Share Camera (Mobile)';
+            // Меняем иконку или текст, если необходимо
+            const icon = toggleScreenBtn.querySelector('i') || toggleScreenBtn.querySelector('span');
+            if (icon) {
+                // Можно изменить иконку для мобильного режима
+            }
+        }
     }
 }
 
@@ -2181,7 +2450,7 @@ async function toggleScreenShare() {
     if (screenStream) {
         // Stop screen sharing
         screenStream.getTracks().forEach(track => track.stop());
-        
+
         // Replace screen track with camera track in all peer connections
         const videoTrack = localStream.getVideoTracks()[0];
         Object.values(peerConnections).forEach(pc => {
@@ -2190,31 +2459,53 @@ async function toggleScreenShare() {
                 sender.replaceTrack(videoTrack);
             }
         });
-        
+
         screenStream = null;
-        
+
         const localVideo = document.getElementById('localVideo');
         localVideo.srcObject = localStream;
-        
+
         updateCallButtons();
     } else {
         try {
-            // Start screen sharing
-            screenStream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    cursor: 'always',
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
-                },
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    sampleRate: 44100
-                }
-            });
+            // Проверяем, является ли устройство мобильным
+            const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
             
+            if (isMobile) {
+                // На мобильных устройствах используем захват камеры вместо экрана
+                // так как API захвата экрана не поддерживается на большинстве мобильных браузеров
+                const constraints = {
+                    video: {
+                        facingMode: 'environment', // Используем внешнюю камеру по умолчанию
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 44100
+                    }
+                };
+                
+                screenStream = await navigator.mediaDevices.getUserMedia(constraints);
+            } else {
+                // На ПК используем стандартный API захвата экрана
+                screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: 'always',
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 44100
+                    }
+                });
+            }
+
             const screenTrack = screenStream.getVideoTracks()[0];
-            
+
             // Replace video track in all peer connections
             Object.values(peerConnections).forEach(pc => {
                 const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -2222,7 +2513,7 @@ async function toggleScreenShare() {
                     sender.replaceTrack(screenTrack);
                 }
             });
-            
+
             // Show screen share in local video
             const localVideo = document.getElementById('localVideo');
             const mixedStream = new MediaStream([
@@ -2230,19 +2521,66 @@ async function toggleScreenShare() {
                 ...localStream.getAudioTracks()
             ]);
             localVideo.srcObject = mixedStream;
-            
+
             // Handle screen share ending
             screenTrack.addEventListener('ended', () => {
                 toggleScreenShare(); // This will stop screen sharing
             });
-            
+
             updateCallButtons();
         } catch (error) {
             console.error('Error sharing screen:', error);
             if (error.name === 'NotAllowedError') {
                 alert('Screen sharing permission denied');
+            } else if (error.name === 'NotFoundError' || error.name === 'OverconstrainedError') {
+                // На мобильных устройствах может не быть внешней камеры
+                try {
+                    // Пробуем использовать фронтальную камеру
+                    const constraints = {
+                        video: {
+                            facingMode: 'user',
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 }
+                        },
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 44100
+                        }
+                    };
+                    
+                    screenStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    
+                    const screenTrack = screenStream.getVideoTracks()[0];
+
+                    // Replace video track in all peer connections
+                    Object.values(peerConnections).forEach(pc => {
+                        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                        if (sender) {
+                            sender.replaceTrack(screenTrack);
+                        }
+                    });
+
+                    // Show screen share in local video
+                    const localVideo = document.getElementById('localVideo');
+                    const mixedStream = new MediaStream([
+                        screenTrack,
+                        ...localStream.getAudioTracks()
+                    ]);
+                    localVideo.srcObject = mixedStream;
+
+                    // Handle screen share ending
+                    screenTrack.addEventListener('ended', () => {
+                        toggleScreenShare(); // This will stop screen sharing
+                    });
+
+                    updateCallButtons();
+                } catch (fallbackError) {
+                    console.error('Error with fallback camera access:', fallbackError);
+                    alert('Screen sharing is not supported on this device. Camera access was also denied.');
+                }
             } else {
-                alert('Error sharing screen. Please try again.');
+                alert('Error sharing screen. Please try again. Note: Screen sharing may not be supported on mobile devices.');
             }
         }
     }
@@ -2263,6 +2601,22 @@ function updateCallButtons() {
 
     if (toggleScreenBtn) {
         toggleScreenBtn.classList.toggle('active', screenStream !== null);
+        
+        // Обновляем подсказку для кнопки в зависимости от типа захвата
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (screenStream) {
+            if (isMobile) {
+                toggleScreenBtn.title = 'Stop Camera Share';
+            } else {
+                toggleScreenBtn.title = 'Stop Screen Share';
+            }
+        } else {
+            if (isMobile) {
+                toggleScreenBtn.title = 'Share Camera (Mobile)';
+            } else {
+                toggleScreenBtn.title = 'Share Screen';
+            }
+        }
     }
 }
 
@@ -2421,19 +2775,23 @@ function populateDMList(friends) {
 // WebRTC Functions
 function createPeerConnection(remoteSocketId, isInitiator) {
     console.log(`Creating peer connection with ${remoteSocketId}, initiator: ${isInitiator}`);
-    
+
     if (peerConnections[remoteSocketId]) {
         console.log('Peer connection already exists');
         return peerConnections[remoteSocketId];
     }
-    
+
     const pc = new RTCPeerConnection({
         iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
             { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' }
+            { urls: 'stun:stun4.l.google.com:19302' },
+            // Добавим TURN сервер для лучшей совместимости
+            { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
         ],
         iceCandidatePoolSize: 10
     });
@@ -2444,15 +2802,15 @@ function createPeerConnection(remoteSocketId, isInitiator) {
     if (localStream) {
         const audioTracks = localStream.getAudioTracks();
         const videoTracks = localStream.getVideoTracks();
-        
+
         console.log(`Adding tracks - Audio: ${audioTracks.length}, Video: ${videoTracks.length}`);
-        
+
         // Add audio tracks first (priority for voice calls)
         audioTracks.forEach(track => {
             console.log(`Adding audio track: ${track.label}, enabled: ${track.enabled}`);
             pc.addTrack(track, localStream);
         });
-        
+
         // Then add video tracks
         videoTracks.forEach(track => {
             console.log(`Adding video track: ${track.label}, enabled: ${track.enabled}`);
@@ -2465,14 +2823,15 @@ function createPeerConnection(remoteSocketId, isInitiator) {
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            console.log('Sending ICE candidate');
+            console.log('Sending ICE candidate to:', remoteSocketId);
             socket.emit('ice-candidate', {
                 to: remoteSocketId,
-                candidate: event.candidate
+                candidate: event.candidate,
+                from: socket.id // Добавляем идентификатор отправителя
             });
         }
     };
-    
+
     // Handle connection state changes
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state: ${pc.iceConnectionState}`);
@@ -2489,39 +2848,39 @@ function createPeerConnection(remoteSocketId, isInitiator) {
     // Handle incoming remote stream
     pc.ontrack = (event) => {
         console.log('Received remote track:', event.track.kind, 'Stream ID:', event.streams[0]?.id);
-        
+
         const remoteParticipants = document.getElementById('remoteParticipants');
-        
+
         let participantDiv = document.getElementById(`participant-${remoteSocketId}`);
         let remoteVideo = document.getElementById(`remote-${remoteSocketId}`);
-        
+
         if (!participantDiv) {
             participantDiv = document.createElement('div');
             participantDiv.className = 'participant';
             participantDiv.id = `participant-${remoteSocketId}`;
-            
+
             remoteVideo = document.createElement('video');
             remoteVideo.id = `remote-${remoteSocketId}`;
             remoteVideo.autoplay = true;
             remoteVideo.playsInline = true;
             remoteVideo.volume = isDeafened ? 0 : 1; // Respect deafened state
-            
+
             const participantName = document.createElement('div');
             participantName.className = 'participant-name';
             participantName.textContent = 'Friend';
-            
+
             participantDiv.appendChild(remoteVideo);
             participantDiv.appendChild(participantName);
             remoteParticipants.appendChild(participantDiv);
         }
-        
+
         // Set the stream to the video element
         if (event.streams && event.streams[0]) {
             console.log('Setting remote stream to video element');
             remoteVideo = document.getElementById(`remote-${remoteSocketId}`);
             if (remoteVideo) {
                 remoteVideo.srcObject = event.streams[0];
-                
+
                 // Ensure audio is playing
                 remoteVideo.play().catch(e => {
                     console.error('Error playing remote video:', e);
@@ -2532,20 +2891,20 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 });
             }
         }
-        
+
         // Initialize resizable videos
         function initializeResizableVideos() {
             const callInterface = document.getElementById('callInterface');
             const participants = callInterface.querySelectorAll('.participant');
-            
+
             participants.forEach(participant => {
                 makeResizable(participant);
             });
-            
+
             // Make call interface resizable too
             makeInterfaceResizable(callInterface);
         }
-        
+
         // Make individual video resizable
         function makeResizable(element) {
             // Add resize handle
@@ -2568,7 +2927,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 color: white;
                 user-select: none;
             `;
-            
+
             // Add video size controls
             const sizeControls = document.createElement('div');
             sizeControls.className = 'video-size-controls';
@@ -2577,7 +2936,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 <button class="size-control-btn maximize-btn" title="Maximize">□</button>
                 <button class="size-control-btn fullscreen-btn" title="Fullscreen">⛶</button>
             `;
-            
+
             if (!element.querySelector('.resize-handle')) {
                 element.appendChild(resizeHandle);
                 element.appendChild(sizeControls);
@@ -2588,31 +2947,31 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 element.style.maxWidth = '90vw';
                 element.style.maxHeight = '90vh';
                 element.setAttribute('data-resizable', 'true');
-                
+
                 // Add double-click for fullscreen
                 element.addEventListener('dblclick', function(e) {
                     if (!e.target.closest('.video-size-controls')) {
                         toggleVideoFullscreen(element);
                     }
                 });
-                
+
                 // Size control buttons
                 const minimizeBtn = sizeControls.querySelector('.minimize-btn');
                 const maximizeBtn = sizeControls.querySelector('.maximize-btn');
                 const fullscreenBtn = sizeControls.querySelector('.fullscreen-btn');
-                
+
                 minimizeBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     element.classList.toggle('minimized');
                     element.classList.remove('maximized');
                 });
-                
+
                 maximizeBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     element.classList.toggle('maximized');
                     element.classList.remove('minimized');
                 });
-                
+
                 fullscreenBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const video = element.querySelector('video');
@@ -2622,7 +2981,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 });
             }
         }
-        
+
         // Toggle video fullscreen
         function toggleVideoFullscreen(element) {
             element.classList.toggle('maximized');
@@ -2630,7 +2989,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 element.classList.remove('minimized');
             }
         }
-        
+
         // Make call interface resizable
         function makeInterfaceResizable(callInterface) {
             const resizeHandle = document.createElement('div');
@@ -2645,16 +3004,16 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 background: linear-gradient(135deg, transparent 50%, #5865f2 50%);
                 border-bottom-right-radius: 12px;
             `;
-            
+
             if (!callInterface.querySelector('.interface-resize-handle')) {
                 callInterface.appendChild(resizeHandle);
-                
+
                 let isResizing = false;
                 let startWidth = 0;
                 let startHeight = 0;
                 let startX = 0;
                 let startY = 0;
-                
+
                 resizeHandle.addEventListener('mousedown', (e) => {
                     isResizing = true;
                     startWidth = parseInt(document.defaultView.getComputedStyle(callInterface).width, 10);
@@ -2663,13 +3022,13 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                     startY = e.clientY;
                     e.preventDefault();
                 });
-                
+
                 document.addEventListener('mousemove', (e) => {
                     if (!isResizing) return;
-                    
+
                     const newWidth = startWidth + e.clientX - startX;
                     const newHeight = startHeight + e.clientY - startY;
-                    
+
                     if (newWidth > 300 && newWidth < window.innerWidth * 0.9) {
                         callInterface.style.width = newWidth + 'px';
                     }
@@ -2677,13 +3036,13 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                         callInterface.style.height = newHeight + 'px';
                     }
                 });
-                
+
                 document.addEventListener('mouseup', () => {
                     isResizing = false;
                 });
             }
         }
-        
+
         // Update resizable functionality when new participants join
         const originalOntrack = RTCPeerConnection.prototype.ontrack;
         window.observeNewParticipants = function() {
@@ -2695,7 +3054,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
                 });
             }, 500);
         };
-        
+
         // Make the new participant video resizable after a short delay
         setTimeout(() => {
             if (typeof makeResizable === 'function' && participantDiv) {
@@ -2706,7 +3065,10 @@ function createPeerConnection(remoteSocketId, isInitiator) {
 
     // Create offer if initiator with modern constraints
     if (isInitiator) {
-        pc.createOffer()
+        pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true
+        })
         .then(offer => {
             console.log('Created offer with SDP:', offer.sdp.substring(0, 200));
             return pc.setLocalDescription(offer);
@@ -2715,16 +3077,126 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             console.log('Sending offer to:', remoteSocketId);
             socket.emit('offer', {
                 to: remoteSocketId,
-                offer: pc.localDescription
+                offer: pc.localDescription,
+                from: socket.id // Добавляем идентификатор отправителя
             });
         })
         .catch(error => {
             console.error('Error creating offer:', error);
         });
     }
-    
+
     return pc;
 }
+
+// Обработчики событий WebRTC должны быть зарегистрированы один раз при инициализации приложения
+document.addEventListener('DOMContentLoaded', () => {
+    // Listen for remote offer (when someone calls us)
+    socket.on('offer', (data) => {
+        console.log('Received offer from:', data.from);
+        const remoteSocketId = data.from;
+        
+        // Create peer connection as receiver (not initiator)
+        if (!peerConnections[remoteSocketId]) {
+            createPeerConnection(remoteSocketId, false);
+        }
+        
+        // Get the peer connection
+        const pc = peerConnections[remoteSocketId];
+        if (pc) {
+            // Set the remote description
+            pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+            .then(() => {
+                // Create answer
+                return pc.createAnswer();
+            })
+            .then(answer => {
+                return pc.setLocalDescription(answer);
+            })
+            .then(() => {
+                // Send answer back to the caller
+                socket.emit('answer', {
+                    to: remoteSocketId,
+                    answer: pc.localDescription,
+                    from: socket.id
+                });
+            })
+            .catch(error => {
+                console.error('Error during offer processing:', error);
+            });
+        }
+    });
+
+    // Listen for remote answer
+    socket.on('answer', (data) => {
+        const pc = peerConnections[data.from];
+        if (pc) {
+            console.log('Received answer from:', data.from);
+            pc.setRemoteDescription(new RTCSessionDescription(data.answer))
+            .then(() => {
+                // После установки удаленного описания обрабатываем сохраненные кандидаты
+                if (pc.candidatesToProcess) {
+                    pc.candidatesToProcess.forEach(candidate => {
+                        try {
+                            pc.addIceCandidate(new RTCIceCandidate(candidate));
+                        } catch (e) {
+                            console.error('Error adding stored ice candidate:', e);
+                        }
+                    });
+                    pc.candidatesToProcess = []; // Очищаем список после обработки
+                }
+            })
+            .catch(error => {
+                console.error('Error setting remote description:', error);
+            });
+        }
+    });
+
+    // Listen for ICE candidates from remote peer
+    socket.on('ice-candidate', (data) => {
+        const pc = peerConnections[data.from];
+        if (pc) {
+            console.log('Received ICE candidate from:', data.from);
+            // Проверяем, что удаленный дескриптор уже установлен
+            if (pc.remoteDescription) {
+                try {
+                    pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (e) {
+                    console.error('Error adding received ice candidate:', e);
+                }
+            } else {
+                // Если удаленный дескриптор еще не установлен, сохраняем кандидаты для последующей обработки
+                if (!pc.candidatesToProcess) {
+                    pc.candidatesToProcess = [];
+                }
+                pc.candidatesToProcess.push(data.candidate);
+            }
+        }
+    });
+    
+    // Обработка события о выходе участника из звонка
+    socket.on('user-left-call', (data) => {
+        const { userId, socketId } = data;
+        console.log(`User ${userId} left the call`);
+        
+        // Закрываем соединение с этим пользователем
+        if (peerConnections[socketId]) {
+            peerConnections[socketId].close();
+            delete peerConnections[socketId];
+        }
+        
+        // Удаляем видео этого участника
+        const remoteVideo = document.getElementById(`remote-${socketId}`);
+        if (remoteVideo) {
+            remoteVideo.remove();
+        }
+        
+        // Обновляем список участников
+        if (window.currentCallDetails && window.currentCallDetails.participants) {
+            window.currentCallDetails.participants = window.currentCallDetails.participants.filter(id => id != userId);
+        }
+    });
+});
 
 // Initialize resizable videos
 function initializeResizableVideos() {
@@ -3699,3 +4171,58 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
   // export if you want
   window.VoxiiSend = { trySend, updateSendState };
 })();
+
+// Функция для выхода из голосового канала и корректного завершения соединений
+function leaveVoiceChannel(isCalledFromRemote = false) {
+    console.log('Leaving voice channel...');
+    
+    // Если это не вызвано удаленно, уведомляем других участников о выходе
+    if (!isCalledFromRemote && socket && socket.connected) {
+        Object.keys(peerConnections).forEach(socketId => {
+            socket.emit('end-call', { to: socketId });
+        });
+    }
+    
+    // Закрываем все peer-соединения
+    Object.keys(peerConnections).forEach(socketId => {
+        const pc = peerConnections[socketId];
+        if (pc) {
+            pc.close();
+        }
+        delete peerConnections[socketId];
+    });
+    
+    // Останавливаем все треки локального потока
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            track.stop();
+        });
+        localStream = null;
+    }
+    
+    // Останавливаем экранную запись, если активна
+    if (screenStream) {
+        screenStream.getTracks().forEach(track => {
+            track.stop();
+        });
+        screenStream = null;
+    }
+    
+    // Очищаем удаленные видео
+    const remoteParticipants = document.getElementById('remoteParticipants');
+    if (remoteParticipants) {
+        remoteParticipants.innerHTML = '';
+    }
+    
+    // Скрываем интерфейс звонка
+    const callInterface = document.getElementById('callInterface');
+    if (callInterface) {
+        callInterface.classList.add('hidden');
+    }
+    
+    // Сбрасываем состояние звонка
+    inCall = false;
+    window.currentCallDetails = null;
+    
+    console.log('Voice channel left successfully');
+}

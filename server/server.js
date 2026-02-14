@@ -448,6 +448,10 @@ app.delete('/api/friends/:friendId', authenticateToken, async (req, res) => {
 // Store connected users
 const users = new Map();
 const rooms = new Map();
+// Store active calls
+const activeCalls = new Map();
+// Store user call states
+const userCallStates = new Map();
 
 // Socket.IO connection handling
 io.use(async (socket, next) => {
@@ -697,23 +701,29 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('offer', (data) => {
-        socket.to(data.to).emit('offer', {
-            offer: data.offer,
-            from: socket.id
+        const { to, offer, from } = data;
+        console.log(`Forwarding offer from ${from} to ${to}`);
+        io.to(to).emit('offer', {
+            offer: offer,
+            from: from
         });
     });
 
     socket.on('answer', (data) => {
-        socket.to(data.to).emit('answer', {
-            answer: data.answer,
-            from: socket.id
+        const { to, answer, from } = data;
+        console.log(`Forwarding answer from ${from} to ${to}`);
+        io.to(to).emit('answer', {
+            answer: answer,
+            from: from
         });
     });
 
     socket.on('ice-candidate', (data) => {
-        socket.to(data.to).emit('ice-candidate', {
-            candidate: data.candidate,
-            from: socket.id
+        const { to, candidate, from } = data;
+        console.log(`Forwarding ICE candidate from ${from} to ${to}`);
+        io.to(to).emit('ice-candidate', {
+            candidate: candidate,
+            from: from
         });
     });
 
@@ -732,15 +742,53 @@ io.on('connection', async (socket) => {
 
         const receiverSocket = Array.from(users.values()).find(u => u.id === to);
         if (receiverSocket) {
-            io.to(receiverSocket.socketId).emit('incoming-call', {
-                from: {
-                    id: from.id,
-                    username: from.username,
-                    socketId: socket.id,
-                    avatar: from.username?.charAt(0).toUpperCase()
-                },
-                type: type
-            });
+            // Проверяем, находится ли получатель уже в звонке
+            if (userCallStates.has(to) && userCallStates.get(to).inCall) {
+                // Если пользователь уже в звонке, отправляем сигнал о присоединении к существующему звонку
+                const existingCall = userCallStates.get(to).callId;
+                const callData = activeCalls.get(existingCall);
+                
+                if (callData) {
+                    // Добавляем инициатора к существующему звонку
+                    callData.participants.push(from.id);
+                    callData.socketIds.push(socket.id);
+                    
+                    // Уведомляем инициатора о необходимости присоединиться к существующему звонку
+                    socket.emit('join-existing-call', {
+                        callId: existingCall,
+                        participants: callData.participants,
+                        type: type
+                    });
+                }
+            } else {
+                // Создаем запись активного звонка
+                const callId = `${from.id}-${to}-${Date.now()}`;
+                activeCalls.set(callId, {
+                    participants: [from.id, to],
+                    initiator: from.id,
+                    socketIds: [socket.id, receiverSocket.socketId]
+                });
+                
+                // Обновляем состояние пользователя
+                userCallStates.set(to, {
+                    inCall: true,
+                    callId: callId
+                });
+                userCallStates.set(from.id, {
+                    inCall: true,
+                    callId: callId
+                });
+                
+                io.to(receiverSocket.socketId).emit('incoming-call', {
+                    from: {
+                        id: from.id,
+                        username: from.username,
+                        socketId: socket.id,
+                        avatar: from.username?.charAt(0).toUpperCase()
+                    },
+                    type: type
+                });
+            }
         } else {
             socket.emit('call-rejected', { message: 'User is offline' });
         }
@@ -750,7 +798,23 @@ io.on('connection', async (socket) => {
         const { to, from } = data;
         console.log(`Call accepted by ${from.id}, connecting to ${to}`);
 
+        // Обновляем состояние пользователя
+        const callId = `${from.id}-${to.id}-${Date.now()}`; // нужно получить реальный ID звонка
+        userCallStates.set(from.id, {
+            inCall: true,
+            callId: callId
+        });
+        
         io.to(to).emit('call-accepted', {
+            from: {
+                id: from.id,
+                username: from.username,
+                socketId: socket.id
+            }
+        });
+        
+        // Также отправляем подтверждение обратно тому, кто принял вызов
+        socket.emit('call-accepted', {
             from: {
                 id: from.id,
                 username: from.username,
@@ -783,7 +847,62 @@ io.on('connection', async (socket) => {
         const { to } = data;
         if (to) {
             io.to(to).emit('call-ended', { from: socket.id });
+            
+            // Уведомляем других участников звонка о выходе пользователя
+            for (let [callId, callData] of activeCalls.entries()) {
+                if (callData.socketIds.includes(socket.id)) {
+                    // Удаляем текущий сокет из списка участников
+                    const otherParticipants = callData.socketIds.filter(sockId => sockId !== socket.id);
+                    
+                    // Уведомляем других участников о выходе
+                    otherParticipants.forEach(otherSocketId => {
+                        io.to(otherSocketId).emit('user-left-call', {
+                            userId: socket.userId,
+                            socketId: socket.id
+                        });
+                    });
+                    
+                    // Удаляем звонок из активных
+                    activeCalls.delete(callId);
+                    
+                    // Обновляем состояние пользователей
+                    callData.participants.forEach(userId => {
+                        if (userCallStates.has(userId)) {
+                            userCallStates.delete(userId);
+                        }
+                    });
+                    break;
+                }
+            }
         }
+    });
+    
+    // Обработка приглашения к звонку
+    socket.on('invite-to-call', (data) => {
+        const { to, callId, type, inviter } = data;
+        console.log(`${inviter.username} invited user ${to} to join call ${callId}`);
+        
+        // Находим сокет получателя приглашения
+        const recipientSocket = Array.from(users.values()).find(u => u.id == to);
+        if (recipientSocket) {
+            io.to(recipientSocket.socketId).emit('call-invitation', {
+                inviter: inviter,
+                callId: callId,
+                type: type
+            });
+        }
+    });
+    
+    // Обработка добавления участника к существующему звонку
+    socket.on('add-participant-to-call', (data) => {
+        const { to, from, type, participants } = data;
+        console.log(`${from.username} is adding user ${to} to call`);
+        
+        io.to(to).emit('add-participant-to-call', {
+            from: from,
+            type: type,
+            participants: participants
+        });
     });
 
     socket.on('disconnect', async () => {
@@ -798,6 +917,32 @@ io.on('connection', async (socket) => {
                 console.error('Error updating status:', error);
             }
 
+            // Уведомляем других участников активных звонков о выходе пользователя
+            for (let [callId, callData] of activeCalls.entries()) {
+                if (callData.socketIds.includes(socket.id)) {
+                    // Удаляем текущий сокет из списка участников
+                    const otherParticipants = callData.socketIds.filter(sockId => sockId !== socket.id);
+                    
+                    // Уведомляем других участников о выходе
+                    otherParticipants.forEach(otherSocketId => {
+                        io.to(otherSocketId).emit('user-left-call', {
+                            userId: socket.userId,
+                            socketId: socket.id
+                        });
+                    });
+                    
+                    // Удаляем звонок из активных
+                    activeCalls.delete(callId);
+                    
+                    // Обновляем состояние пользователей
+                    callData.participants.forEach(userId => {
+                        if (userCallStates.has(userId)) {
+                            userCallStates.delete(userId);
+                        }
+                    });
+                }
+            }
+            
             rooms.forEach((members, roomName) => {
                 if (members.has(socket.id)) {
                     members.delete(socket.id);
