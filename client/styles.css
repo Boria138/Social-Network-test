@@ -1041,7 +1041,7 @@ body::after{
 }
 
 .size-control-btn:hover {
-    background: rgba(139,92,246,.55);
+    background: var(--accent-transparent);
     color: #fff;
 }
 

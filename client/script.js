@@ -2898,7 +2898,10 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             const participants = callInterface.querySelectorAll('.participant');
 
             participants.forEach(participant => {
-                makeResizable(participant);
+                // Check if resizable functionality has already been applied
+                if (!participant.hasAttribute('data-resizable')) {
+                    makeResizable(participant);
+                }
             });
 
             // Make call interface resizable too
@@ -3044,7 +3047,6 @@ function createPeerConnection(remoteSocketId, isInitiator) {
         }
 
         // Update resizable functionality when new participants join
-        const originalOntrack = RTCPeerConnection.prototype.ontrack;
         window.observeNewParticipants = function() {
             setTimeout(() => {
                 const participants = document.querySelectorAll('.participant:not([data-resizable])');
@@ -3057,7 +3059,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
 
         // Make the new participant video resizable after a short delay
         setTimeout(() => {
-            if (typeof makeResizable === 'function' && participantDiv) {
+            if (typeof makeResizable === 'function' && participantDiv && !participantDiv.hasAttribute('data-resizable')) {
                 makeResizable(participantDiv);
             }
         }, 100);
@@ -3202,12 +3204,15 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeResizableVideos() {
     const callInterface = document.getElementById('callInterface');
     if (!callInterface) return;
-    
+
     const participants = callInterface.querySelectorAll('.participant');
     participants.forEach(participant => {
-        makeResizable(participant);
+        // Check if resizable functionality has already been applied
+        if (!participant.hasAttribute('data-resizable')) {
+            makeResizable(participant);
+        }
     });
-    
+
     // Make call interface resizable too
     makeInterfaceResizable(callInterface);
 }
