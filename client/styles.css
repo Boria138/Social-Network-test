@@ -550,7 +550,7 @@ body::after{
     background: rgba(255,255,255,.040);
 }
 
-.message-text.user-message-text {
+.message-text.user-message-text:not(:empty) {
     background: linear-gradient(135deg, var(--accent-transparent), var(--accentB-transparent));
     padding: 8px 12px;
     border-radius: 8px;
