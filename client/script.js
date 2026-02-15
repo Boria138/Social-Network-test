@@ -25,6 +25,12 @@ let users = new Map();
 let isMobileView = window.innerWidth <= 820;
 // Переменная для отслеживания редактируемого сообщения
 let editingMessageId = null;
+
+// Variables for voice recording
+let isRecording = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStartTime = null;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     token = localStorage.getItem('token');
@@ -74,6 +80,11 @@ function initializeApp() {
 
     // Setup reply to selection functionality
     setupReplyToSelection();
+    
+    // Restore voice message handlers after initialization
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 500);
 }
 
 function requestNotificationPermissionOnce() {
@@ -128,6 +139,14 @@ function connectToSocketIO() {
         socket.on('new-dm', (data) => {
             // Отображаем сообщение, если оно от пользователя, с которым мы общаемся
             if (currentView === 'dm' && currentDMUserId && data.senderId === currentDMUserId) {
+                // Определяем, является ли файл голосовым сообщением
+                let isVoiceMessage = false;
+                if (data.message.file) {
+                    const fileExtension = data.message.file.filename.split('.').pop().toLowerCase();
+                    const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+                    isVoiceMessage = audioExtensions.includes(fileExtension);
+                }
+                
                 addMessageToUI({
                     id: data.message.id,
                     author: data.message.author,
@@ -136,6 +155,7 @@ function connectToSocketIO() {
                     timestamp: data.message.timestamp,
                     reactions: data.message.reactions || [],
                     file: data.message.file,  // Добавляем информацию о файле, если она есть
+                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                     edited: data.message.edited  // Добавляем флаг редактирования, если есть
                 });
                 scrollToBottom();
@@ -145,6 +165,14 @@ function connectToSocketIO() {
         socket.on('dm-sent', (data) => {
             // Отображаем наше сообщение, если оно было отправлено в текущий чат
             if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
+                // Определяем, является ли файл голосовым сообщением
+                let isVoiceMessage = false;
+                if (data.message.file) {
+                    const fileExtension = data.message.file.filename.split('.').pop().toLowerCase();
+                    const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+                    isVoiceMessage = audioExtensions.includes(fileExtension);
+                }
+                
                 // Добавляем сообщение, которое мы отправили
                 addMessageToUI({
                     id: data.message.id,
@@ -154,6 +182,7 @@ function connectToSocketIO() {
                     timestamp: data.message.timestamp,
                     reactions: data.message.reactions || [],
                     file: data.message.file,  // Добавляем информацию о файле, если она есть
+                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                     edited: data.message.edited  // Добавляем флаг редактирования, если есть
                 });
                 scrollToBottom();
@@ -163,9 +192,19 @@ function connectToSocketIO() {
         socket.on('updated-dm', (data) => {
             // Обновляем сообщение, если оно от пользователя, с которым мы общаемся
             if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
+                // Определяем, является ли файл голосовым сообщением
+                let isVoiceMessage = false;
+                if (data.message.file) {
+                    const fileExtension = data.message.file.filename.split('.').pop().toLowerCase();
+                    const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+                    isVoiceMessage = audioExtensions.includes(fileExtension);
+                }
+                
                 updateMessageInUI({
                     id: data.message.id,
                     text: data.message.text,
+                    file: data.message.file,
+                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                     edited: true  // Всегда помечаем как отредактированное при обновлении
                 });
             }
@@ -174,9 +213,19 @@ function connectToSocketIO() {
         socket.on('dm-updated', (data) => {
             // Обновляем сообщение у отправителя
             if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
+                // Определяем, является ли файл голосовым сообщением
+                let isVoiceMessage = false;
+                if (data.message.file) {
+                    const fileExtension = data.message.file.filename.split('.').pop().toLowerCase();
+                    const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+                    isVoiceMessage = audioExtensions.includes(fileExtension);
+                }
+                
                 updateMessageInUI({
                     id: data.message.id,
                     text: data.message.text,
+                    file: data.message.file,
+                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                     edited: true  // Всегда помечаем как отредактированное при обновлении
                 });
             }
@@ -1043,6 +1092,11 @@ window.startDM = async function(friendId, friendUsername) {
     }
 
     await loadDMHistory(friendId);
+    
+    // Restore voice message handlers after loading history
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 100);
 };
 
 // Функция для открытия чата с самим собой
@@ -1066,7 +1120,7 @@ function startSelfChat() {
             </div>
             <span class="channel-name" data-i18n="chat.selfChat">Self Chat</span>
         `;
-        
+
         // Применяем локализацию к обновленному элементу
         window.i18n.applyI18n(chatHeaderInfo);
     }
@@ -1078,6 +1132,11 @@ function startSelfChat() {
 
     // Загружаем историю сообщений для Self Chat
     loadSelfChatHistory();
+    
+    // Restore voice message handlers after loading history
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 100);
 }
 
 // Функция для загрузки истории Self Chat из localStorage
@@ -1095,6 +1154,14 @@ function loadSelfChatHistory() {
     const selfChatHistory = JSON.parse(localStorage.getItem(`selfChatHistory_${currentUser.id}`)) || [];
 
     selfChatHistory.forEach(message => {
+        // Определяем, является ли файл голосовым сообщением
+        let isVoiceMessage = false;
+        if (message.file) {
+            const fileExtension = message.file.filename.split('.').pop().toLowerCase();
+            const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+            isVoiceMessage = audioExtensions.includes(fileExtension);
+        }
+        
         addMessageToUI({
             id: message.id,
             author: message.author,
@@ -1102,11 +1169,17 @@ function loadSelfChatHistory() {
             text: message.text,
             timestamp: message.timestamp,
             reactions: message.reactions || [],
-            file: message.file  // Добавляем информацию о файле, если она есть
+            file: message.file,  // Добавляем информацию о файле, если она есть
+            isVoiceMessage: isVoiceMessage // Определяем, является ли это голосовым сообщением
         });
     });
 
     scrollToBottom();
+    
+    // Restore voice message handlers after loading history
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 100);
 }
 
 // Функция для сохранения сообщения в истории Self Chat
@@ -1141,6 +1214,11 @@ function showFriendsView() {
     // Hide chat and show friends content
     if (chatView) chatView.style.display = 'none';
     if (friendsView) friendsView.style.display = 'flex';
+    
+    // Clear voice message elements when switching to friends view
+    if (window.voiceMessageElements) {
+        window.voiceMessageElements = [];
+    }
 }
 
 // Show server view
@@ -1171,6 +1249,186 @@ function initializeMessageInput() {
     });
 }
 
+// Voice recording functions
+async function startRecording() {
+    try {
+        // Request access to microphone
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Create media recorder
+        mediaRecorder = new MediaRecorder(stream);
+        recordedChunks = [];
+        
+        // Event handlers for recording
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        };
+        
+        mediaRecorder.onstop = () => {
+            // Stop all tracks in the stream
+            stream.getTracks().forEach(track => track.stop());
+            
+            // Create blob from recorded chunks
+            const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+            
+            // Send the recorded audio
+            sendVoiceMessage(audioBlob);
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        isRecording = true;
+        recordingStartTime = Date.now();
+        
+        // Update UI to show recording state
+        updateRecordingUI(true);
+        
+        console.log('Recording started');
+    } catch (error) {
+        console.error('Error starting recording:', error);
+        alert('Could not access microphone. Please check permissions.');
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+        
+        // Update UI to hide recording state
+        updateRecordingUI(false);
+        
+        console.log('Recording stopped');
+    }
+}
+
+// Variable to store the interval ID for updating recording time
+let recordingTimeUpdateInterval = null;
+
+function updateRecordingUI(show) {
+    const sendBtn = document.getElementById('sendBtn');
+    const messageInput = document.getElementById('messageInput');
+    if (!sendBtn || !messageInput) return;
+    
+    // Clear any existing interval
+    if (recordingTimeUpdateInterval) {
+        clearInterval(recordingTimeUpdateInterval);
+        recordingTimeUpdateInterval = null;
+    }
+    
+    // Remove any existing recording timer element
+    const existingTimer = document.querySelector('.recording-timer');
+    if (existingTimer) {
+        existingTimer.remove();
+    }
+    
+    if (show) {
+        // Change button appearance to indicate recording
+        sendBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="5" fill="red"/></svg>';
+        sendBtn.classList.add('recording');
+        sendBtn.title = 'Release to send voice message';
+        sendBtn.setAttribute('aria-label', 'Release to send voice message');
+        
+        // Create recording timer element
+        const timerElement = document.createElement('div');
+        timerElement.className = 'recording-timer';
+        timerElement.textContent = '0:00';
+        timerElement.style.position = 'absolute';
+        timerElement.style.bottom = '10px';
+        timerElement.style.right = '10px';
+        timerElement.style.backgroundColor = 'rgba(239, 68, 68, 0.9)';
+        timerElement.style.color = 'white';
+        timerElement.style.padding = '4px 8px';
+        timerElement.style.borderRadius = '12px';
+        timerElement.style.fontSize = '12px';
+        timerElement.style.zIndex = '10';
+        timerElement.style.fontWeight = 'bold';
+        
+        // Add the timer next to the message input
+        const wrapper = messageInput.parentElement;
+        wrapper.style.position = 'relative';
+        wrapper.appendChild(timerElement);
+        
+        // Start updating recording time
+        recordingTimeUpdateInterval = setInterval(() => {
+            if (recordingStartTime) {
+                const elapsedSeconds = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const minutes = Math.floor(elapsedSeconds / 60);
+                const seconds = elapsedSeconds % 60;
+                timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }, 1000);
+    } else {
+        // Restore original button appearance
+        sendBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>';
+        sendBtn.classList.remove('recording');
+        sendBtn.title = window.i18n ? window.i18n.t('actions.send') : 'Send';
+        sendBtn.setAttribute('aria-label', window.i18n ? window.i18n.t('actions.send') : 'Send');
+    }
+}
+
+async function sendVoiceMessage(audioBlob) {
+    try {
+        // Create a unique filename with voice prefix
+        const fileName = `voice_message_${Date.now()}.webm`;
+        
+        // Create form data to send the audio file
+        const formData = new FormData();
+        formData.append('file', audioBlob, fileName);
+        formData.append('dmId', currentDMUserId);
+        formData.append('senderId', currentUser.id);
+        formData.append('isVoiceMessage', 'true'); // Flag to identify voice messages
+        formData.append('folder', 'voice_messages'); // Specify the folder for voice messages
+        
+        const response = await fetch(`${getApiUrl()}/api/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error('Upload failed');
+        }
+        
+        const fileData = await response.json();
+        
+        // Create message object with voice file
+        const message = {
+            id: Date.now(),
+            author: currentUser.username,
+            avatar: currentUser.avatar,
+            text: '', // No text for voice messages
+            file: fileData,
+            isVoiceMessage: true, // Mark as voice message
+            duration: null, // Will be set when audio metadata is loaded
+            timestamp: new Date(),
+            reactions: []
+        };
+        
+        // If this is a Self Chat, save the message locally
+        if (currentDMUserId === currentUser.id) {
+            addMessageToUI(message);
+            saveSelfMessageToHistory(message);
+            scrollToBottom();
+        } else if (currentDMUserId) {
+            // For regular DMs, send via socket
+            if (socket && socket.connected) {
+                socket.emit('send-dm', {
+                    receiverId: currentDMUserId,
+                    message: message
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error sending voice message:', error);
+        alert('Failed to send voice message');
+    }
+}
+
 // Функция для автоматического изменения высоты textarea
 function adjustTextareaHeight(textarea) {
     textarea.style.height = 'auto';
@@ -1178,6 +1436,12 @@ function adjustTextareaHeight(textarea) {
 }
 
 function sendMessage() {
+    // Не отправляем текстовое сообщение, если идет запись голоса
+    if (isRecording) {
+        console.log('Recording in progress, not sending text message');
+        return;
+    }
+
     const messageInput = document.getElementById('messageInput');
 
     if (!messageInput) {
@@ -1234,10 +1498,10 @@ function addMessageToUI(message) {
     }
 
     const messageGroup = document.createElement('div');
-    
+
     messageGroup.className = 'message-group';
     messageGroup.setAttribute('data-message-id', message.id || Date.now());
-    
+
     // Проверяем, является ли сообщение отправленным текущим пользователем
     // Исключаем self chat, так как все сообщения там от текущего пользователя
     const isUserMessage = message.author === currentUser.username && currentDMUserId !== currentUser.id;
@@ -1272,7 +1536,7 @@ function addMessageToUI(message) {
 
     // Process the message text to handle quotes
     let processedText = formatQuotedText(message.text);
-    
+
     // Add edited indicator if message was edited
     if (message.edited) {
         processedText += ' <span class="edited-indicator">(' + (window.i18n ? window.i18n.t('message.edited') : 'edited') + ')</span>';
@@ -1281,8 +1545,160 @@ function addMessageToUI(message) {
     // Set the HTML content to display formatted quotes
     text.innerHTML = processedText;
 
-    // If the message contains a file, add it to the message
-    if (message.file) {
+    // Handle voice messages separately from file attachments
+    if (message.isVoiceMessage && message.file) {
+        const voiceContainer = document.createElement('div');
+        voiceContainer.className = 'voice-message-container';
+        
+        // Create waveform visualization container
+        const waveformContainer = document.createElement('div');
+        waveformContainer.className = 'voice-waveform';
+        waveformContainer.style.display = 'flex';
+        waveformContainer.style.alignItems = 'center';
+        waveformContainer.style.gap = '2px';
+        waveformContainer.style.margin = '8px 0';
+        waveformContainer.style.padding = '4px';
+        waveformContainer.style.background = 'var(--glass)';
+        waveformContainer.style.borderRadius = '10px';
+        
+        // Generate simple waveform bars
+        for (let i = 0; i < 20; i++) {
+            const bar = document.createElement('div');
+            bar.style.width = '3px';
+            bar.style.height = `${Math.random() * 12 + 6}px`;
+            bar.style.backgroundColor = 'var(--accent)';
+            bar.style.borderRadius = '2px';
+            waveformContainer.appendChild(bar);
+        }
+        
+        // Create audio player with speed controls
+        const audio = document.createElement('audio');
+        audio.src = message.file.url;
+        audio.className = 'voice-player';
+        audio.style.width = '100%';
+        audio.style.margin = '8px 0';
+        
+        // Create custom controls container
+        const controlsContainer = document.createElement('div');
+        controlsContainer.className = 'voice-controls';
+        controlsContainer.style.display = 'flex';
+        controlsContainer.style.alignItems = 'center';
+        controlsContainer.style.gap = '10px';
+        controlsContainer.style.marginTop = '8px';
+        
+        // Play/Pause button
+        const playBtn = document.createElement('button');
+        playBtn.className = 'voice-play-btn';
+        playBtn.innerHTML = '▶';
+        playBtn.style.background = 'var(--accent)';
+        playBtn.style.border = 'none';
+        playBtn.style.borderRadius = '50%';
+        playBtn.style.width = '36px';
+        playBtn.style.height = '36px';
+        playBtn.style.display = 'flex';
+        playBtn.style.alignItems = 'center';
+        playBtn.style.justifyContent = 'center';
+        playBtn.style.cursor = 'pointer';
+        playBtn.style.color = 'white';
+        playBtn.style.flexShrink = '0';
+        
+        // Speed control
+        const speedBtn = document.createElement('button');
+        speedBtn.className = 'voice-speed-btn';
+        speedBtn.textContent = '1x';
+        speedBtn.style.background = 'transparent';
+        speedBtn.style.border = '1px solid var(--accent)';
+        speedBtn.style.borderRadius = '8px';
+        speedBtn.style.padding = '4px 10px';
+        speedBtn.style.cursor = 'pointer';
+        speedBtn.style.color = 'var(--accent)';
+        speedBtn.style.fontSize = '12px';
+        speedBtn.style.fontWeight = '600';
+        
+        // Duration display
+        const durationDisplay = document.createElement('span');
+        durationDisplay.className = 'voice-duration';
+        durationDisplay.textContent = '0:00';
+        durationDisplay.style.color = 'var(--muted)';
+        durationDisplay.style.fontSize = '13px';
+        durationDisplay.style.marginLeft = 'auto';
+        
+        // Add event listeners
+        let isPlaying = false;
+        playBtn.addEventListener('click', () => {
+            if (isPlaying) {
+                audio.pause();
+                playBtn.innerHTML = '▶';
+            } else {
+                audio.play();
+                playBtn.innerHTML = '⏸';
+            }
+            isPlaying = !isPlaying;
+        });
+        
+        let currentSpeed = 1;
+        const speeds = [0.5, 1, 1.25, 1.5, 2];
+        let speedIndex = 1; // Default to 1x
+        
+        speedBtn.addEventListener('click', () => {
+            speedIndex = (speedIndex + 1) % speeds.length;
+            currentSpeed = speeds[speedIndex];
+            audio.playbackRate = currentSpeed;
+            speedBtn.textContent = `${currentSpeed}x`;
+        });
+        
+        // Update duration when metadata is loaded
+        audio.addEventListener('loadedmetadata', () => {
+            const minutes = Math.floor(audio.duration / 60);
+            const seconds = Math.floor(audio.duration % 60);
+            durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        });
+        
+        // Also try to update duration when audio can play through
+        audio.addEventListener('canplaythrough', () => {
+            if (audio.duration && !isNaN(audio.duration)) {
+                const minutes = Math.floor(audio.duration / 60);
+                const seconds = Math.floor(audio.duration % 60);
+                durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        });
+        
+        // Set duration to 'Loading...' initially
+        durationDisplay.textContent = '...';
+        
+        // Try to set duration immediately if audio is already loaded
+        if (audio.readyState >= 1 && audio.duration) {
+            const minutes = Math.floor(audio.duration / 60);
+            const seconds = Math.floor(audio.duration % 60);
+            durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        // Update play button when audio ends
+        audio.addEventListener('ended', () => {
+            playBtn.innerHTML = '▶';
+            isPlaying = false;
+        });
+        
+        // Store the audio element in a global array to prevent garbage collection
+        if (!window.voiceMessageElements) {
+            window.voiceMessageElements = [];
+        }
+        // Store references to the elements for later restoration
+        window.voiceMessageElements.push({ audio, playBtn, speedBtn, durationDisplay });
+        
+        // Add elements to containers
+        controlsContainer.appendChild(playBtn);
+        controlsContainer.appendChild(speedBtn);
+        controlsContainer.appendChild(durationDisplay);
+        
+        voiceContainer.appendChild(waveformContainer);
+        voiceContainer.appendChild(audio);
+        voiceContainer.appendChild(controlsContainer);
+        
+        content.appendChild(voiceContainer);
+    } 
+    // If the message contains a file (but not a voice message), add it to the message
+    else if (message.file) {
         const fileDiv = document.createElement('div');
         fileDiv.className = 'file-attachment';
 
@@ -1351,7 +1767,7 @@ function addMessageToUI(message) {
 
             fileDiv.appendChild(video);
         } else if (audioExtensions.includes(fileExtension)) {
-            // Audio preview
+            // Audio preview (non-voice messages)
             const audio = document.createElement('audio');
             audio.src = message.file.url;
             audio.controls = true;
@@ -1502,7 +1918,7 @@ function addMessageToUI(message) {
     // Create a container for action buttons to position them properly
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'message-actions';
-    
+
     // Add edit and delete buttons for user's own messages
     if (isUserMessage) {
         const editBtn = document.createElement('button');
@@ -1510,17 +1926,17 @@ function addMessageToUI(message) {
         editBtn.textContent = '✏️';  // Pencil emoji for edit
         editBtn.title = 'Edit message';
         editBtn.onclick = () => editMessage(message);
-        
+
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
         deleteBtn.textContent = '🗑️';  // Trash emoji for delete
         deleteBtn.title = 'Delete message';
         deleteBtn.onclick = () => deleteMessage(message.id);
-        
+
         actionsContainer.appendChild(editBtn);
         actionsContainer.appendChild(deleteBtn);
     }
-    
+
     actionsContainer.appendChild(replyBtn);
     actionsContainer.appendChild(addReactionBtn);
     reactionsAndActionsContainer.appendChild(actionsContainer);
@@ -1534,6 +1950,11 @@ function addMessageToUI(message) {
     if (typeof twemoji !== 'undefined') {
         twemoji.parse(messageGroup);
     }
+    
+    // Restore voice message handlers after adding the message
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 0);
 }
 
 function formatTimestamp(date) {
@@ -1705,6 +2126,11 @@ function updateMessageInUI(updatedMessage) {
             }
         }
     }
+    
+    // Restore voice message handlers after updating message
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 50);
 }
 
 // Function to delete a message from the UI
@@ -1713,6 +2139,11 @@ function deleteMessageFromUI(messageId) {
     if (messageElement) {
         messageElement.remove();
     }
+    
+    // Restore voice message handlers after deleting message
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 50);
 }
 
 // Function to handle reply to selected text
@@ -1837,6 +2268,11 @@ function scrollToBottom() {
     if (messagesContainer) {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
+    
+    // Restore voice message handlers after scrolling
+    setTimeout(() => {
+        restoreVoiceMessageHandlers();
+    }, 100);
 }
 
 // Emoji picker
@@ -2693,6 +3129,14 @@ async function loadDMHistory(userId) {
        if (response.ok) {
            const messages = await response.json();
            messages.forEach(message => {
+               // Определяем, является ли файл голосовым сообщением
+               let isVoiceMessage = false;
+               if (message.file) {
+                   const fileExtension = message.file.filename.split('.').pop().toLowerCase();
+                   const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+                   isVoiceMessage = audioExtensions.includes(fileExtension);
+               }
+               
                addMessageToUI({
                    id: message.id,
                    author: message.username,
@@ -2701,6 +3145,7 @@ async function loadDMHistory(userId) {
                    timestamp: message.created_at,
                    reactions: message.reactions || [],
                    file: message.file,  // Добавляем информацию о файле, если она есть
+                   isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                    edited: message.edited  // Добавляем флаг редактирования, если он существует
                });
            });
@@ -2712,6 +3157,11 @@ async function loadDMHistory(userId) {
    }
 
    scrollToBottom();
+   
+   // Restore voice message handlers after loading history
+   setTimeout(() => {
+       restoreVoiceMessageHandlers();
+   }, 100);
 }
 
 console.log('Discord Clone initialized successfully!');
@@ -4109,9 +4559,10 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
 /* =========================
    Send button + enter behavior
-   - Enter: send
+   - Enter: send text
    - Shift+Enter: newline
-   - Button enabled only when text exists
+   - Button click: send text if exists
+   - Button hold: record voice message
    ========================= */
 
 (function(){
@@ -4123,8 +4574,12 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
     if (!input || !btn) return;
 
     const hasText = input.value.trim().length > 0;
-    btn.disabled = !hasText;
-    btn.classList.toggle("ready", hasText);
+    // If we're not recording, enable/disable based on text presence
+    if (!isRecording) {
+      // Always enable the button when there's text, or when there's no text but we want to record voice
+      btn.disabled = false;
+      btn.classList.toggle("ready", hasText);
+    }
   }
 
   function trySend(){
@@ -4151,6 +4606,12 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
     updateSendState();
   }
 
+  // Track if we're currently handling a press/hover event
+  let isMouseDown = false;
+  let isTouchDown = false;
+  let pressTimer = null;
+  let pressTimeout = 300; // 300ms threshold for considering it a long press
+  
   document.addEventListener("DOMContentLoaded", () => {
     const input = getEl("messageInput");
     const btn = getEl("sendBtn");
@@ -4165,9 +4626,115 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
       }
     });
 
+    // Voice recording functionality
+    // Add event listeners to the button to ensure full area coverage
+    // Using mousedown for mouse events and touchstart for touch events
+    
+    // For mouse events - attach to the button itself to ensure full area coverage
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      // Don't use stopPropagation here to allow normal event flow
+      isMouseDown = true;
+
+      // Start timer to determine if it's a long press
+      pressTimer = setTimeout(() => {
+        // Only start recording if there's no text in the input
+        if (!input.value.trim() && !isRecording) {
+          startRecording();
+        }
+      }, pressTimeout);
+    });
+
+    // For touch events - also attach to the button itself
+    btn.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      // Don't use stopPropagation here to allow normal event flow
+      isTouchDown = true;
+
+      // Start timer to determine if it's a long press
+      pressTimer = setTimeout(() => {
+        // Only start recording if there's no text in the input
+        if (!input.value.trim() && !isRecording) {
+          startRecording();
+        }
+      }, pressTimeout);
+    });
+
+    // Handle quick clicks (for sending text when there's text in input)
     btn.addEventListener("click", (e) => {
       e.preventDefault();
-      trySend();
+      // Only send text message if there's text and not recording
+      if (input.value.trim() && !isRecording) {
+        trySend();
+      }
+    });
+
+    // Stop recording when mouse/touch is released anywhere
+    document.addEventListener("mouseup", (e) => {
+      // Check if mouseup occurred outside the button area
+      if (isMouseDown && !btn.contains(e.target)) {
+        // If mouse was pressed and released outside button, cancel recording
+        isMouseDown = false;
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+
+        if (isRecording) {
+          stopRecording();
+        }
+      } else if (isMouseDown) {
+        // If mouse was pressed and released inside button, allow release
+        isMouseDown = false;
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+
+        if (isRecording) {
+          stopRecording();
+        }
+      }
+    });
+
+    document.addEventListener("touchend", (e) => {
+      // Check if touchend occurred outside the button area
+      if (isTouchDown && !btn.contains(e.target)) {
+        // If touch was pressed and released outside button, cancel recording
+        isTouchDown = false;
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+
+        if (isRecording) {
+          stopRecording();
+        }
+      } else if (isTouchDown) {
+        // If touch was pressed and released inside button, allow release
+        isTouchDown = false;
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+
+        if (isRecording) {
+          stopRecording();
+        }
+      }
+    });
+
+    // Cancel recording if mouse leaves the button area
+    btn.addEventListener("mouseleave", () => {
+      isMouseDown = false;
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+
+      if (isRecording) {
+        stopRecording();
+      }
     });
 
     updateSendState();
@@ -4177,17 +4744,87 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
   window.VoxiiSend = { trySend, updateSendState };
 })();
 
+// Функция для восстановления обработчиков голосовых сообщений
+function restoreVoiceMessageHandlers() {
+    if (window.voiceMessageElements) {
+        window.voiceMessageElements.forEach(item => {
+            const { audio, playBtn, speedBtn, durationDisplay } = item;
+            
+            if (audio && playBtn && speedBtn && durationDisplay) {
+                // Проверяем, что элементы все еще находятся в DOM
+                if (document.contains(audio) && document.contains(playBtn)) {
+                    // Удаляем старые обработчики
+                    const newPlayBtn = playBtn.cloneNode(true);
+                    
+                    // Восстанавливаем обработчики
+                    let isPlaying = false;
+                    newPlayBtn.addEventListener('click', () => {
+                        if (isPlaying) {
+                            audio.pause();
+                            newPlayBtn.innerHTML = '▶';
+                        } else {
+                            audio.play();
+                            newPlayBtn.innerHTML = '⏸';
+                        }
+                        isPlaying = !isPlaying;
+                    });
+                    
+                    // Заменяем старую кнопку на новую с обработчиками
+                    if (playBtn.parentNode) {
+                        playBtn.parentNode.replaceChild(newPlayBtn, playBtn);
+                    }
+                    
+                    // Восстанавливаем обработчик скорости
+                    const newSpeedBtn = speedBtn.cloneNode(true);
+                    
+                    let currentSpeed = 1;
+                    const speeds = [0.5, 1, 1.25, 1.5, 2];
+                    let speedIndex = 1; // Default to 1x
+                    
+                    newSpeedBtn.addEventListener('click', () => {
+                        speedIndex = (speedIndex + 1) % speeds.length;
+                        currentSpeed = speeds[speedIndex];
+                        audio.playbackRate = currentSpeed;
+                        newSpeedBtn.textContent = `${currentSpeed}x`;
+                    });
+                    
+                    // Заменяем старую кнопку скорости на новую
+                    if (speedBtn.parentNode) {
+                        speedBtn.parentNode.replaceChild(newSpeedBtn, speedBtn);
+                    }
+                    
+                    // Обновляем длительность при загрузке метаданных
+                    if (audio.readyState >= 1) {
+                        // Если аудио уже загружено, обновляем длительность
+                        const minutes = Math.floor(audio.duration / 60);
+                        const seconds = Math.floor(audio.duration % 60);
+                        durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    } else {
+                        // Если аудио еще не загружено, ждем события loadedmetadata
+                        audio.addEventListener('loadedmetadata', function updateDuration() {
+                            const minutes = Math.floor(audio.duration / 60);
+                            const seconds = Math.floor(audio.duration % 60);
+                            durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                            audio.removeEventListener('loadedmetadata', updateDuration);
+                        });
+                    }
+                }
+            }
+        });
+    }
+}
+
 // Функция для выхода из голосового канала и корректного завершения соединений
 function leaveVoiceChannel(isCalledFromRemote = false) {
     console.log('Leaving voice channel...');
-    
+
     // Если это не вызвано удаленно, уведомляем других участников о выходе
     if (!isCalledFromRemote && socket && socket.connected) {
         Object.keys(peerConnections).forEach(socketId => {
             socket.emit('end-call', { to: socketId });
         });
     }
-    
+
     // Закрываем все peer-соединения
     Object.keys(peerConnections).forEach(socketId => {
         const pc = peerConnections[socketId];
@@ -4196,7 +4833,7 @@ function leaveVoiceChannel(isCalledFromRemote = false) {
         }
         delete peerConnections[socketId];
     });
-    
+
     // Останавливаем все треки локального потока
     if (localStream) {
         localStream.getTracks().forEach(track => {
@@ -4204,7 +4841,7 @@ function leaveVoiceChannel(isCalledFromRemote = false) {
         });
         localStream = null;
     }
-    
+
     // Останавливаем экранную запись, если активна
     if (screenStream) {
         screenStream.getTracks().forEach(track => {
@@ -4212,22 +4849,22 @@ function leaveVoiceChannel(isCalledFromRemote = false) {
         });
         screenStream = null;
     }
-    
+
     // Очищаем удаленные видео
     const remoteParticipants = document.getElementById('remoteParticipants');
     if (remoteParticipants) {
         remoteParticipants.innerHTML = '';
     }
-    
+
     // Скрываем интерфейс звонка
     const callInterface = document.getElementById('callInterface');
     if (callInterface) {
         callInterface.classList.add('hidden');
     }
-    
+
     // Сбрасываем состояние звонка
     inCall = false;
     window.currentCallDetails = null;
-    
+
     console.log('Voice channel left successfully');
 }

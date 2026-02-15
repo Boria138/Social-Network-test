@@ -2400,3 +2400,102 @@ body.drawer-open{
     margin-left: 4px;
     vertical-align: middle;
 }
+
+/* Voice message recording indicators */
+.send-btn.recording {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.voice-message-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 0.9em;
+}
+
+/* Voice message styles */
+.voice-message-container {
+    width: 100%;
+    background: var(--glass);
+    border-radius: 18px;
+    padding: 12px;
+    border: 1px solid var(--stroke);
+    display: flex;
+    flex-direction: column;
+}
+
+.voice-waveform {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 0;
+}
+
+.voice-player {
+    width: 100%;
+    margin: 8px 0;
+}
+
+.voice-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.voice-play-btn {
+    background: var(--accent) !important;
+    border: none !important;
+    border-radius: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    color: white !important;
+    flex-shrink: 0;
+}
+
+.voice-speed-btn {
+    background: transparent !important;
+    border: 1px solid var(--accent) !important;
+    border-radius: 8px !important;
+    padding: 4px 10px !important;
+    cursor: pointer !important;
+    color: var(--accent) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+}
+
+.voice-duration {
+    color: var(--muted) !important;
+    font-size: 13px !important;
+    margin-left: auto !important;
+}
+
+/* Recording timer */
+.recording-timer {
+    position: absolute !important;
+    bottom: 10px !important;
+    right: 10px !important;
+    background-color: rgba(239, 68, 68, 0.9) !important;
+    color: white !important;
+    padding: 4px 8px !important;
+    border-radius: 12px !important;
+    font-size: 12px !important;
+    z-index: 10 !important;
+    font-weight: bold !important;
+}
