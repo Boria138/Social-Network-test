@@ -1,218 +1,252 @@
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 const dbPath = path.join(__dirname, 'discord_clone.db');
-const db = new Database(dbPath);
-
-// Включаем внешние ключи
-db.pragma('foreign_keys = ON');
+const db = new sqlite3.Database(dbPath);
 
 // Initialize database tables
 function initializeDatabase() {
-    // Users table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            avatar TEXT,
-            status TEXT DEFAULT 'Online',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+    db.serialize(() => {
+        // Users table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                avatar TEXT,
+                status TEXT DEFAULT 'Online',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
-    // Servers table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS servers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            icon TEXT,
-            owner_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (owner_id) REFERENCES users(id)
-        )
-    `);
+        // Servers table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS servers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                icon TEXT,
+                owner_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (owner_id) REFERENCES users(id)
+            )
+        `);
 
-    // Direct messages table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS direct_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT NOT NULL,
-            sender_id INTEGER,
-            receiver_id INTEGER,
-            read BOOLEAN DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (sender_id) REFERENCES users(id),
-            FOREIGN KEY (receiver_id) REFERENCES users(id)
-        )
-    `);
+        // Direct messages table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS direct_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                sender_id INTEGER,
+                receiver_id INTEGER,
+                read BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (sender_id) REFERENCES users(id),
+                FOREIGN KEY (receiver_id) REFERENCES users(id)
+            )
+        `);
+        
+        // Check if updated_at column exists, if not add it
+        db.all("PRAGMA table_info(direct_messages)", (err, rows) => {
+            if (!err) {
+                const hasUpdatedAtColumn = rows.some(row => row.name === 'updated_at');
+                const hasIsEditedColumn = rows.some(row => row.name === 'is_edited');
+                const hasOriginalContentColumn = rows.some(row => row.name === 'original_content');
 
-    // Миграция: добавляем недостающие столбцы в direct_messages
-    const dmColumns = db.pragma('table_info(direct_messages)');
-    const hasUpdatedAtColumn = dmColumns.some(col => col.name === 'updated_at');
-    const hasIsEditedColumn = dmColumns.some(col => col.name === 'is_edited');
-    const hasOriginalContentColumn = dmColumns.some(col => col.name === 'original_content');
+                if (!hasUpdatedAtColumn) {
+                    db.run("ALTER TABLE direct_messages ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;", (err) => {
+                        if (err) {
+                            console.log("Error adding updated_at column:", err.message);
+                        } else {
+                            console.log("Added updated_at column to direct_messages table");
+                        }
+                    });
+                }
 
-    if (!hasUpdatedAtColumn) {
-        try {
-            db.exec("ALTER TABLE direct_messages ADD COLUMN updated_at DATETIME;");
-            db.exec("UPDATE direct_messages SET updated_at = created_at WHERE updated_at IS NULL;");
-            console.log("✓ Добавлен столбец updated_at в direct_messages");
-        } catch (err) {
-            console.error("Ошибка при добавлении updated_at:", err.message);
-        }
-    }
+                if (!hasIsEditedColumn) {
+                    db.run("ALTER TABLE direct_messages ADD COLUMN is_edited BOOLEAN DEFAULT FALSE;", (err) => {
+                        if (err) {
+                            console.log("Error adding is_edited column:", err.message);
+                        } else {
+                            console.log("Added is_edited column to direct_messages table");
+                        }
+                    });
+                }
 
-    if (!hasIsEditedColumn) {
-        try {
-            db.exec("ALTER TABLE direct_messages ADD COLUMN is_edited BOOLEAN DEFAULT 0;");
-            console.log("✓ Добавлен столбец is_edited в direct_messages");
-        } catch (err) {
-            console.error("Ошибка при добавлении is_edited:", err.message);
-        }
-    }
+                if (!hasOriginalContentColumn) {
+                    db.run("ALTER TABLE direct_messages ADD COLUMN original_content TEXT;", (err) => {
+                        if (err) {
+                            console.log("Error adding original_content column:", err.message);
+                        } else {
+                            console.log("Added original_content column to direct_messages table");
+                        }
+                    });
+                }
+            }
+        });
 
-    if (!hasOriginalContentColumn) {
-        try {
-            db.exec("ALTER TABLE direct_messages ADD COLUMN original_content TEXT;");
-            console.log("✓ Добавлен столбец original_content в direct_messages");
-        } catch (err) {
-            console.error("Ошибка при добавлении original_content:", err.message);
-        }
-    }
+        // File uploads table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS file_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                filepath TEXT NOT NULL,
+                filetype TEXT,
+                filesize INTEGER,
+                user_id INTEGER,
+                dm_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (dm_id) REFERENCES direct_messages(id)
+            )
+        `);
 
-    // File uploads table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS file_uploads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT NOT NULL,
-            filepath TEXT NOT NULL,
-            filetype TEXT,
-            filesize INTEGER,
-            user_id INTEGER,
-            dm_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (dm_id) REFERENCES direct_messages(id)
-        )
-    `);
+        // Check if dm_id column exists, if not add it
+        db.all("PRAGMA table_info(file_uploads)", (err, rows) => {
+            if (!err) {
+                const hasDmIdColumn = rows.some(row => row.name === 'dm_id');
+                if (!hasDmIdColumn) {
+                    db.run("ALTER TABLE file_uploads ADD COLUMN dm_id INTEGER;", (err) => {
+                        if (err) {
+                            console.log("Error adding dm_id column:", err.message);
+                        } else {
+                            console.log("Added dm_id column to file_uploads table");
+                        }
+                    });
+                }
 
-    // Миграция: добавляем недостающие столбцы в file_uploads
-    const fileColumns = db.pragma('table_info(file_uploads)');
-    const hasDmIdColumn = fileColumns.some(col => col.name === 'dm_id');
-    const hasSenderIdColumn = fileColumns.some(col => col.name === 'sender_id');
-    const hasReceiverIdColumn = fileColumns.some(col => col.name === 'receiver_id');
+                // Check if sender_id and receiver_id columns exist, if not add them
+                const hasSenderIdColumn = rows.some(row => row.name === 'sender_id');
+                const hasReceiverIdColumn = rows.some(row => row.name === 'receiver_id');
 
-    if (!hasDmIdColumn) {
-        try {
-            db.exec("ALTER TABLE file_uploads ADD COLUMN dm_id INTEGER;");
-            console.log("✓ Добавлен столбец dm_id в file_uploads");
-        } catch (err) {
-            console.error("Ошибка при добавлении dm_id:", err.message);
-        }
-    }
+                if (!hasSenderIdColumn) {
+                    db.run("ALTER TABLE file_uploads ADD COLUMN sender_id INTEGER;", (err) => {
+                        if (err) {
+                            console.log("Error adding sender_id column:", err.message);
+                        } else {
+                            console.log("Added sender_id column to file_uploads table");
+                        }
+                    });
+                }
 
-    if (!hasSenderIdColumn) {
-        try {
-            db.exec("ALTER TABLE file_uploads ADD COLUMN sender_id INTEGER;");
-            console.log("✓ Добавлен столбец sender_id в file_uploads");
-        } catch (err) {
-            console.error("Ошибка при добавлении sender_id:", err.message);
-        }
-    }
+                if (!hasReceiverIdColumn) {
+                    db.run("ALTER TABLE file_uploads ADD COLUMN receiver_id INTEGER;", (err) => {
+                        if (err) {
+                            console.log("Error adding receiver_id column:", err.message);
+                        } else {
+                            console.log("Added receiver_id column to file_uploads table");
+                        }
+                    });
+                }
+            }
+        });
 
-    if (!hasReceiverIdColumn) {
-        try {
-            db.exec("ALTER TABLE file_uploads ADD COLUMN receiver_id INTEGER;");
-            console.log("✓ Добавлен столбец receiver_id в file_uploads");
-        } catch (err) {
-            console.error("Ошибка при добавлении receiver_id:", err.message);
-        }
-    }
+        // Reactions table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS reactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                emoji TEXT NOT NULL,
+                message_id INTEGER,
+                user_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (message_id) REFERENCES direct_messages(id),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(message_id, user_id, emoji)
+            )
+        `);
 
-    // Reactions table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS reactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            emoji TEXT NOT NULL,
-            message_id INTEGER,
-            user_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (message_id) REFERENCES direct_messages(id),
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            UNIQUE(message_id, user_id, emoji)
-        )
-    `);
+        // Server members table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS server_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER,
+                user_id INTEGER,
+                joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (server_id) REFERENCES servers(id),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(server_id, user_id)
+            )
+        `);
 
-    // Server members table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS server_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            server_id INTEGER,
-            user_id INTEGER,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (server_id) REFERENCES servers(id),
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            UNIQUE(server_id, user_id)
-        )
-    `);
+        // Friends table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS friends (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                friend_id INTEGER,
+                status TEXT DEFAULT 'pending',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (friend_id) REFERENCES users(id),
+                UNIQUE(user_id, friend_id)
+            )
+        `);
 
-    // Friends table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS friends (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            friend_id INTEGER,
-            status TEXT DEFAULT 'pending',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (friend_id) REFERENCES users(id),
-            UNIQUE(user_id, friend_id)
-        )
-    `);
+        // Sessions table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        `);
 
-    // Sessions table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expires_at DATETIME,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    `);
-
-    console.log('Database initialized successfully');
+        console.log('Database initialized successfully');
+    });
 }
 
 // User operations
 const userDB = {
     create: (username, email, hashedPassword) => {
-        const stmt = db.prepare('INSERT INTO users (username, email, password) VALUES (?, ?, ?)');
-        const result = stmt.run(username, email, hashedPassword);
-        return Promise.resolve({ id: result.lastInsertRowid, username, email });
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT INTO users (username, email, password) VALUES (?, ?, ?)';
+            db.run(sql, [username, email, hashedPassword], function(err) {
+                if (err) reject(err);
+                else resolve({ id: this.lastID, username, email });
+            });
+        });
     },
 
     findByEmail: (email) => {
-        const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
-        return Promise.resolve(stmt.get(email));
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT * FROM users WHERE email = ?';
+            db.get(sql, [email], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
     },
 
     findById: (id) => {
-        const stmt = db.prepare('SELECT id, username, email, avatar, status FROM users WHERE id = ?');
-        return Promise.resolve(stmt.get(id));
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT id, username, email, avatar, status FROM users WHERE id = ?';
+            db.get(sql, [id], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
     },
 
     updateStatus: (id, status) => {
-        const stmt = db.prepare('UPDATE users SET status = ? WHERE id = ?');
-        stmt.run(status, id);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE users SET status = ? WHERE id = ?';
+            db.run(sql, [status, id], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     getAll: () => {
-        const stmt = db.prepare('SELECT id, username, email, avatar, status FROM users');
-        return Promise.resolve(stmt.all());
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT id, username, email, avatar, status FROM users';
+            db.all(sql, [], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
     }
 };
 
@@ -220,335 +254,464 @@ const userDB = {
 // Direct message operations
 const dmDB = {
     create: (content, senderId, receiverId) => {
-        const stmt = db.prepare('INSERT INTO direct_messages (content, original_content, sender_id, receiver_id) VALUES (?, ?, ?, ?)');
-        const result = stmt.run(content, content, senderId, receiverId);
-        return Promise.resolve({ id: result.lastInsertRowid, content, senderId, receiverId });
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT INTO direct_messages (content, original_content, sender_id, receiver_id) VALUES (?, ?, ?, ?)';
+            db.run(sql, [content, content, senderId, receiverId], function(err) {
+                if (err) reject(err);
+                else resolve({ id: this.lastID, content, senderId, receiverId });
+            });
+        });
     },
 
     getConversation: (userId1, userId2, limit = 50) => {
-        const stmt = db.prepare(`
-            SELECT dm.*, u.username, u.avatar
-            FROM direct_messages dm
-            JOIN users u ON dm.sender_id = u.id
-            WHERE (dm.sender_id = ? AND dm.receiver_id = ?)
-               OR (dm.sender_id = ? AND dm.receiver_id = ?)
-            ORDER BY dm.created_at DESC
-            LIMIT ?
-        `);
-        const rows = stmt.all(userId1, userId2, userId2, userId1, limit);
-        const processedRows = rows.map(row => ({
-            ...row,
-            edited: Boolean(row.is_edited),
-            originalContent: row.is_edited ? row.original_content : undefined
-        }));
-        return Promise.resolve(processedRows.reverse());
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT dm.*, u.username, u.avatar
+                FROM direct_messages dm
+                JOIN users u ON dm.sender_id = u.id
+                WHERE (dm.sender_id = ? AND dm.receiver_id = ?)
+                   OR (dm.sender_id = ? AND dm.receiver_id = ?)
+                ORDER BY dm.created_at DESC
+                LIMIT ?
+            `;
+            db.all(sql, [userId1, userId2, userId2, userId1, limit], (err, rows) => {
+                if (err) reject(err);
+                else {
+                    // Преобразуем поле is_edited из числа в булевое значение
+                    const processedRows = rows.map(row => ({
+                        ...row,
+                        edited: Boolean(row.is_edited),
+                        originalContent: row.is_edited ? row.original_content : undefined
+                    }));
+                    resolve(processedRows.reverse());
+                }
+            });
+        });
     },
 
     getById: (messageId) => {
-        const stmt = db.prepare('SELECT *, CASE WHEN is_edited THEN original_content ELSE NULL END AS originalContent FROM direct_messages WHERE id = ?');
-        return Promise.resolve(stmt.get(messageId));
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT *, CASE WHEN is_edited THEN original_content ELSE NULL END AS originalContent FROM direct_messages WHERE id = ?';
+            db.get(sql, [messageId], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
     },
 
     update: (messageId, newContent) => {
-        const originalMessage = dmDB.getById(messageId).then(msg => msg);
-        
-        return originalMessage.then(originalMessage => {
-            const dmColumns = db.pragma('table_info(direct_messages)');
-            const hasUpdatedAtColumn = dmColumns.some(col => col.name === 'updated_at');
-            const hasIsEditedColumn = dmColumns.some(col => col.name === 'is_edited');
-            const hasOriginalContentColumn = dmColumns.some(col => col.name === 'original_content');
+        return new Promise((resolve, reject) => {
+            // Сначала получаем текущее сообщение, чтобы проверить статус is_edited
+            dmDB.getById(messageId)
+                .then(originalMessage => {
+                    // Проверяем наличие столбцов перед обновлением
+                    db.all("PRAGMA table_info(direct_messages)", (err, rows) => {
+                        if (err) {
+                            reject(err);
+                            return;
+                        }
 
-            let stmt;
-            if (hasUpdatedAtColumn && hasIsEditedColumn && hasOriginalContentColumn) {
-                if (!originalMessage.is_edited) {
-                    stmt = db.prepare('UPDATE direct_messages SET content = ?, original_content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?');
-                    stmt.run(newContent, originalMessage.content, messageId);
-                } else {
-                    stmt = db.prepare('UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-                    stmt.run(newContent, messageId);
-                }
-            } else if (hasUpdatedAtColumn && hasIsEditedColumn) {
-                stmt = db.prepare('UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?');
-                stmt.run(newContent, messageId);
-            } else if (hasUpdatedAtColumn) {
-                stmt = db.prepare('UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-                stmt.run(newContent, messageId);
-            } else if (hasIsEditedColumn) {
-                stmt = db.prepare('UPDATE direct_messages SET content = ?, is_edited = TRUE WHERE id = ?');
-                stmt.run(newContent, messageId);
-            } else {
-                stmt = db.prepare('UPDATE direct_messages SET content = ? WHERE id = ?');
-                stmt.run(newContent, messageId);
-            }
-            return Promise.resolve();
+                        const hasUpdatedAtColumn = rows.some(row => row.name === 'updated_at');
+                        const hasIsEditedColumn = rows.some(row => row.name === 'is_edited');
+                        const hasOriginalContentColumn = rows.some(row => row.name === 'original_content');
+
+                        let sql;
+                        if (hasUpdatedAtColumn && hasIsEditedColumn && hasOriginalContentColumn) {
+                            // Если все три столбца существуют
+                            if (!originalMessage.is_edited) {
+                                // Если сообщение еще не редактировалось, устанавливаем original_content
+                                sql = 'UPDATE direct_messages SET content = ?, original_content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?';
+                                db.run(sql, [newContent, originalMessage.content, messageId], (err) => {
+                                    if (err) reject(err);
+                                    else resolve();
+                                });
+                            } else {
+                                // Если сообщение уже редактировалось, просто обновляем content и updated_at
+                                sql = 'UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+                                db.run(sql, [newContent, messageId], (err) => {
+                                    if (err) reject(err);
+                                    else resolve();
+                                });
+                            }
+                        } else if (hasUpdatedAtColumn && hasIsEditedColumn) {
+                            // Если только updated_at и is_edited существуют
+                            sql = 'UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        } else if (hasUpdatedAtColumn) {
+                            // Если только updated_at существует
+                            sql = 'UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        } else if (hasIsEditedColumn) {
+                            // Если только is_edited существует
+                            sql = 'UPDATE direct_messages SET content = ?, is_edited = TRUE WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        } else {
+                            // Если ни один из дополнительных столбцов не существует
+                            sql = 'UPDATE direct_messages SET content = ? WHERE id = ?';
+                            db.run(sql, [newContent, messageId], (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            });
+                        }
+                    });
+                })
+                .catch(error => {
+                    reject(error);
+                });
         });
     },
 
     delete: (messageId) => {
-        const deleteReactions = db.prepare('DELETE FROM reactions WHERE message_id = ?');
-        const deleteFiles = db.prepare('DELETE FROM file_uploads WHERE dm_id = ?');
-        const deleteMessage = db.prepare('DELETE FROM direct_messages WHERE id = ?');
-
-        const transaction = db.transaction((id) => {
-            deleteReactions.run(id);
-            deleteFiles.run(id);
-            deleteMessage.run(id);
+        return new Promise((resolve, reject) => {
+            // Удаляем сначала реакции и файлы, связанные с сообщением
+            const deleteReactionsSql = 'DELETE FROM reactions WHERE message_id = ?';
+            const deleteFilesSql = 'DELETE FROM file_uploads WHERE dm_id = ?';
+            const deleteMessageSql = 'DELETE FROM direct_messages WHERE id = ?';
+            
+            db.serialize(() => {
+                // Удаляем реакции
+                db.run(deleteReactionsSql, [messageId], (err) => {
+                    if (err) {
+                        console.error('Error deleting reactions:', err);
+                        // Продолжаем выполнение даже если возникла ошибка
+                    }
+                    
+                    // Удаляем файлы
+                    db.run(deleteFilesSql, [messageId], (err) => {
+                        if (err) {
+                            console.error('Error deleting files:', err);
+                            // Продолжаем выполнение даже если возникла ошибка
+                        }
+                        
+                        // Удаляем само сообщение
+                        db.run(deleteMessageSql, [messageId], (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                    });
+                });
+            });
         });
-
-        transaction(messageId);
-        return Promise.resolve();
     },
 
     markAsRead: (messageId) => {
-        const stmt = db.prepare('UPDATE direct_messages SET read = 1 WHERE id = ?');
-        stmt.run(messageId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE direct_messages SET read = 1 WHERE id = ?';
+            db.run(sql, [messageId], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     }
 };
 
 // File operations
 const fileDB = {
     create: (filename, filepath, filetype, filesize, userId, dmId) => {
-        const stmt = db.prepare('INSERT INTO file_uploads (filename, filepath, filetype, filesize, user_id, dm_id) VALUES (?, ?, ?, ?, ?, ?)');
-        const result = stmt.run(filename, filepath, filetype, filesize, userId, dmId);
-        return Promise.resolve({ id: result.lastInsertRowid, filename, filepath });
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT INTO file_uploads (filename, filepath, filetype, filesize, user_id, dm_id) VALUES (?, ?, ?, ?, ?, ?)';
+            db.run(sql, [filename, filepath, filetype, filesize, userId, dmId], function(err) {
+                if (err) reject(err);
+                else resolve({ id: this.lastID, filename, filepath });
+            });
+        });
     },
 
     getByDM: (dmId) => {
-        const stmt = db.prepare(`
-            SELECT f.*, u.username
-            FROM file_uploads f
-            JOIN users u ON f.user_id = u.id
-            WHERE f.dm_id = ?
-            ORDER BY f.created_at DESC
-        `);
-        return Promise.resolve(stmt.all(dmId));
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT f.*, u.username
+                FROM file_uploads f
+                JOIN users u ON f.user_id = u.id
+                WHERE f.dm_id = ?
+                ORDER BY f.created_at DESC
+            `;
+            db.all(sql, [dmId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
     },
 
     updateSenderReceiver: (fileId, senderId, receiverId) => {
-        const stmt = db.prepare('UPDATE file_uploads SET sender_id = ?, receiver_id = ? WHERE id = ?');
-        stmt.run(senderId, receiverId, fileId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE file_uploads SET sender_id = ?, receiver_id = ? WHERE id = ?';
+            db.run(sql, [senderId, receiverId, fileId], function(err) {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     linkToFileMessage: (fileId, messageId) => {
-        const stmt = db.prepare('UPDATE file_uploads SET dm_id = ? WHERE id = ?');
-        stmt.run(messageId, fileId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE file_uploads SET dm_id = ? WHERE id = ?';
+            db.run(sql, [messageId, fileId], function(err) {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     }
 };
 
 // Reaction operations
 const reactionDB = {
     add: (emoji, messageId, userId) => {
-        const stmt = db.prepare('INSERT OR IGNORE INTO reactions (emoji, message_id, user_id) VALUES (?, ?, ?)');
-        const result = stmt.run(emoji, messageId, userId);
-        return Promise.resolve({ id: result.lastInsertRowid, emoji, messageId, userId });
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT OR IGNORE INTO reactions (emoji, message_id, user_id) VALUES (?, ?, ?)';
+            db.run(sql, [emoji, messageId, userId], function(err) {
+                if (err) reject(err);
+                else resolve({ id: this.lastID, emoji, messageId, userId });
+            });
+        });
     },
 
     remove: (emoji, messageId, userId) => {
-        const stmt = db.prepare('DELETE FROM reactions WHERE emoji = ? AND message_id = ? AND user_id = ?');
-        stmt.run(emoji, messageId, userId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'DELETE FROM reactions WHERE emoji = ? AND message_id = ? AND user_id = ?';
+            db.run(sql, [emoji, messageId, userId], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     getByMessage: (messageId) => {
-        const stmt = db.prepare(`
-            SELECT r.emoji, COUNT(*) as count, GROUP_CONCAT(u.username) as users
-            FROM reactions r
-            JOIN users u ON r.user_id = u.id
-            WHERE r.message_id = ?
-            GROUP BY r.emoji
-        `);
-        return Promise.resolve(stmt.all(messageId));
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT r.emoji, COUNT(*) as count, GROUP_CONCAT(u.username) as users
+                FROM reactions r
+                JOIN users u ON r.user_id = u.id
+                WHERE r.message_id = ?
+                GROUP BY r.emoji
+            `;
+            db.all(sql, [messageId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
     }
 };
 
 // Friend operations
 const friendDB = {
     sendRequest: (userId, friendId) => {
-        const stmt = db.prepare('INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "pending")');
-        const result = stmt.run(userId, friendId);
-        return Promise.resolve({ changes: result.changes });
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "pending")';
+            db.run(sql, [userId, friendId], function(err) {
+                if (err) reject(err);
+                else resolve({ changes: this.changes });
+            });
+        });
     },
 
     acceptRequest: (userId, friendId) => {
-        const updateStmt = db.prepare('UPDATE friends SET status = "accepted" WHERE user_id = ? AND friend_id = ?');
-        const insertStmt = db.prepare('INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "accepted")');
-        
-        updateStmt.run(friendId, userId);
-        insertStmt.run(userId, friendId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            db.serialize(() => {
+                // Update the request status
+                const sql1 = 'UPDATE friends SET status = "accepted" WHERE user_id = ? AND friend_id = ?';
+                db.run(sql1, [friendId, userId], (err) => {
+                    if (err) return reject(err);
+                });
+
+                // Create reverse relationship
+                const sql2 = 'INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "accepted")';
+                db.run(sql2, [userId, friendId], function(err) {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+        });
     },
 
     rejectRequest: (userId, friendId) => {
-        const stmt = db.prepare('DELETE FROM friends WHERE user_id = ? AND friend_id = ?');
-        stmt.run(friendId, userId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'DELETE FROM friends WHERE user_id = ? AND friend_id = ?';
+            db.run(sql, [friendId, userId], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     removeFriend: (userId, friendId) => {
-        const stmt1 = db.prepare('DELETE FROM friends WHERE user_id = ? AND friend_id = ?');
-        const stmt2 = db.prepare('DELETE FROM friends WHERE user_id = ? AND friend_id = ?');
-        
-        stmt1.run(userId, friendId);
-        stmt2.run(friendId, userId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            db.serialize(() => {
+                const sql1 = 'DELETE FROM friends WHERE user_id = ? AND friend_id = ?';
+                const sql2 = 'DELETE FROM friends WHERE user_id = ? AND friend_id = ?';
+                
+                db.run(sql1, [userId, friendId], (err) => {
+                    if (err) return reject(err);
+                });
+                
+                db.run(sql2, [friendId, userId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+        });
     },
 
     getFriends: (userId) => {
-        const stmt = db.prepare(`
-            SELECT u.id, u.username, u.email, u.avatar, u.status, f.status as friendship_status
-            FROM friends f
-            JOIN users u ON f.friend_id = u.id
-            WHERE f.user_id = ? AND f.status = 'accepted'
-        `);
-        return Promise.resolve(stmt.all(userId));
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT u.id, u.username, u.email, u.avatar, u.status, f.status as friendship_status
+                FROM friends f
+                JOIN users u ON f.friend_id = u.id
+                WHERE f.user_id = ? AND f.status = 'accepted'
+            `;
+            db.all(sql, [userId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
     },
 
     getPendingRequests: (userId) => {
-        const stmt = db.prepare(`
-            SELECT u.id, u.username, u.email, u.avatar, u.status
-            FROM friends f
-            JOIN users u ON f.user_id = u.id
-            WHERE f.friend_id = ? AND f.status = 'pending'
-        `);
-        return Promise.resolve(stmt.all(userId));
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT u.id, u.username, u.email, u.avatar, u.status
+                FROM friends f
+                JOIN users u ON f.user_id = u.id
+                WHERE f.friend_id = ? AND f.status = 'pending'
+            `;
+            db.all(sql, [userId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
     },
 
     checkFriendship: (userId, friendId) => {
-        const stmt = db.prepare('SELECT * FROM friends WHERE user_id = ? AND friend_id = ? AND status = "accepted"');
-        const row = stmt.get(userId, friendId);
-        return Promise.resolve(!!row);
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT * FROM friends WHERE user_id = ? AND friend_id = ? AND status = "accepted"';
+            db.get(sql, [userId, friendId], (err, row) => {
+                if (err) reject(err);
+                else resolve(!!row);
+            });
+        });
     }
 };
 
 // Server operations
 const serverDB = {
     create: (name, ownerId) => {
-        const icon = name.charAt(0).toUpperCase();
-        const stmt = db.prepare('INSERT INTO servers (name, icon, owner_id) VALUES (?, ?, ?)');
-        const result = stmt.run(name, icon, ownerId);
-        return Promise.resolve({ id: result.lastInsertRowid, name, icon, ownerId });
+        return new Promise((resolve, reject) => {
+            const icon = name.charAt(0).toUpperCase();
+            const sql = 'INSERT INTO servers (name, icon, owner_id) VALUES (?, ?, ?)';
+            db.run(sql, [name, icon, ownerId], function(err) {
+                if (err) reject(err);
+                else resolve({ id: this.lastID, name, icon, ownerId });
+            });
+        });
     },
 
     getUserServers: (userId) => {
-        const stmt = db.prepare(`
-            SELECT s.* FROM servers s
-            JOIN server_members sm ON s.id = sm.server_id
-            WHERE sm.user_id = ?
-            ORDER BY s.created_at ASC
-        `);
-        return Promise.resolve(stmt.all(userId));
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT s.* FROM servers s
+                JOIN server_members sm ON s.id = sm.server_id
+                WHERE sm.user_id = ?
+                ORDER BY s.created_at ASC
+            `;
+            db.all(sql, [userId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
     },
 
     addMember: (serverId, userId) => {
-        const stmt = db.prepare('INSERT OR IGNORE INTO server_members (server_id, user_id) VALUES (?, ?)');
-        stmt.run(serverId, userId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT OR IGNORE INTO server_members (server_id, user_id) VALUES (?, ?)';
+            db.run(sql, [serverId, userId], function(err) {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     getMembers: (serverId) => {
-        const stmt = db.prepare(`
-            SELECT u.id, u.username, u.email, u.avatar, u.status
-            FROM server_members sm
-            JOIN users u ON sm.user_id = u.id
-            WHERE sm.server_id = ?
-        `);
-        return Promise.resolve(stmt.all(serverId));
-    },
-
-    getById: (serverId) => {
-        const stmt = db.prepare('SELECT * FROM servers WHERE id = ?');
-        return Promise.resolve(stmt.get(serverId));
-    },
-
-    update: (serverId, name) => {
-        const stmt = db.prepare('UPDATE servers SET name = ? WHERE id = ?');
-        stmt.run(name, serverId);
-        return Promise.resolve();
-    },
-
-    delete: (serverId) => {
-        const deleteMembers = db.prepare('DELETE FROM server_members WHERE server_id = ?');
-        const deleteServer = db.prepare('DELETE FROM servers WHERE id = ?');
-        
-        const transaction = db.transaction((id) => {
-            deleteMembers.run(id);
-            deleteServer.run(id);
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT u.id, u.username, u.avatar, u.status
+                FROM users u
+                JOIN server_members sm ON u.id = sm.user_id
+                WHERE sm.server_id = ?
+            `;
+            db.all(sql, [serverId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
         });
-        
-        transaction(serverId);
-        return Promise.resolve();
-    },
-
-    removeMember: (serverId, userId) => {
-        const stmt = db.prepare('DELETE FROM server_members WHERE server_id = ? AND user_id = ?');
-        stmt.run(serverId, userId);
-        return Promise.resolve();
-    },
-
-    isMember: (serverId, userId) => {
-        const stmt = db.prepare('SELECT * FROM server_members WHERE server_id = ? AND user_id = ?');
-        const row = stmt.get(serverId, userId);
-        return Promise.resolve(!!row);
     }
 };
 
 // Session operations
 const sessionDB = {
-    create: (id, userId, expiresAt) => {
-        const stmt = db.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)');
-        stmt.run(id, userId, expiresAt);
-        return Promise.resolve();
+    create: (sessionId, userId, expiresAt = null) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)';
+            db.run(sql, [sessionId, userId, expiresAt], (err) => {
+                if (err) reject(err);
+                else resolve({ id: sessionId, user_id: userId, expires_at: expiresAt });
+            });
+        });
     },
 
-    findById: (id) => {
-        const stmt = db.prepare('SELECT * FROM sessions WHERE id = ?');
-        return Promise.resolve(stmt.get(id));
+    findBySessionId: (sessionId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'SELECT * FROM sessions WHERE id = ?';
+            db.get(sql, [sessionId], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
     },
 
-    findBySessionId: (id) => {
-        const stmt = db.prepare('SELECT * FROM sessions WHERE id = ?');
-        return Promise.resolve(stmt.get(id));
-    },
-
-    delete: (id) => {
-        const stmt = db.prepare('DELETE FROM sessions WHERE id = ?');
-        stmt.run(id);
-        return Promise.resolve();
+    deleteBySessionId: (sessionId) => {
+        return new Promise((resolve, reject) => {
+            const sql = 'DELETE FROM sessions WHERE id = ?';
+            db.run(sql, [sessionId], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     deleteExpired: () => {
-        const stmt = db.prepare('DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP');
-        stmt.run();
-        return Promise.resolve();
-    },
-
-    deleteByUserId: (userId) => {
-        const stmt = db.prepare('DELETE FROM sessions WHERE user_id = ?');
-        stmt.run(userId);
-        return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const sql = 'DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime("now")';
+            db.run(sql, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
     },
 
     cleanup: () => {
-        // Запускаем периодическую очистку просроченных сессий (каждые 30 минут)
-        setInterval(() => {
+        // Clean up expired sessions periodically
+        setInterval(async () => {
             try {
-                const stmt = db.prepare('DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP');
-                const result = stmt.run();
-                if (result.changes > 0) {
-                    console.log(`🧹 Удалено ${result.changes} просроченных сессий`);
-                }
-            } catch (err) {
-                console.error('Ошибка при очистке сессий:', err.message);
+                await sessionDB.deleteExpired();
+            } catch (error) {
+                console.error('Session cleanup error:', error);
             }
-        }, 30 * 60 * 1000);
-        return Promise.resolve();
+        }, 60 * 60 * 1000); // Run every hour
     }
 };
 
 module.exports = {
+    db,
     initializeDatabase,
     userDB,
     dmDB,
@@ -556,6 +719,5 @@ module.exports = {
     reactionDB,
     friendDB,
     serverDB,
-    sessionDB,
-    db
+    sessionDB
 };
