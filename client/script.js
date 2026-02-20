@@ -1252,40 +1252,70 @@ function initializeMessageInput() {
 // Voice recording functions
 async function startRecording() {
     try {
-        // Request access to microphone
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Request access to microphone with specific constraints for Firefox Android
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                channelCount: 1,
+                sampleRate: 48000,
+                echoCancellation: true,
+                noiseSuppression: true
+            } 
+        });
+
+        // Determine best supported MIME type
+        let mimeType = 'audio/webm';
+        let mimeTypeOptions = { mimeType: 'audio/webm' };
         
-        // Create media recorder
-        mediaRecorder = new MediaRecorder(stream);
+        // Firefox Android works better with audio/ogg
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+            if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                mimeType = 'audio/ogg;codecs=opus';
+                mimeTypeOptions = { mimeType: 'audio/ogg;codecs=opus' };
+            } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                mimeType = 'audio/webm;codecs=opus';
+                mimeTypeOptions = { mimeType: 'audio/webm;codecs=opus' };
+            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                mimeType = 'audio/webm';
+                mimeTypeOptions = { mimeType: 'audio/webm' };
+            } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+                mimeType = 'audio/ogg';
+                mimeTypeOptions = { mimeType: 'audio/ogg' };
+            }
+        }
+
+        console.log('Using MIME type:', mimeType);
+
+        // Create media recorder with explicit options
+        mediaRecorder = new MediaRecorder(stream, mimeTypeOptions);
         recordedChunks = [];
-        
+
         // Event handlers for recording
         mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
                 recordedChunks.push(event.data);
             }
         };
-        
+
         mediaRecorder.onstop = () => {
             // Stop all tracks in the stream
             stream.getTracks().forEach(track => track.stop());
-            
-            // Create blob from recorded chunks
-            const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-            
+
+            // Create blob from recorded chunks with correct MIME type
+            const audioBlob = new Blob(recordedChunks, { type: mimeType });
+
             // Send the recorded audio
-            sendVoiceMessage(audioBlob);
+            sendVoiceMessage(audioBlob, mimeType);
         };
-        
+
         // Start recording
         mediaRecorder.start();
         isRecording = true;
         recordingStartTime = Date.now();
-        
+
         // Update UI to show recording state
         updateRecordingUI(true);
-        
-        console.log('Recording started');
+
+        console.log('Recording started with MIME type:', mimeType);
     } catch (error) {
         console.error('Error starting recording:', error);
         alert('Could not access microphone. Please check permissions.');
@@ -1308,29 +1338,28 @@ function stopRecording() {
 let recordingTimeUpdateInterval = null;
 
 function updateRecordingUI(show) {
-    const sendBtn = document.getElementById('sendBtn');
+    const voiceRecordBtn = document.getElementById('voiceRecordBtn');
     const messageInput = document.getElementById('messageInput');
-    if (!sendBtn || !messageInput) return;
-    
+    if (!voiceRecordBtn || !messageInput) return;
+
     // Clear any existing interval
     if (recordingTimeUpdateInterval) {
         clearInterval(recordingTimeUpdateInterval);
         recordingTimeUpdateInterval = null;
     }
-    
+
     // Remove any existing recording timer element
     const existingTimer = document.querySelector('.recording-timer');
     if (existingTimer) {
         existingTimer.remove();
     }
-    
+
     if (show) {
-        // Change button appearance to indicate recording
-        sendBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="5" fill="red"/></svg>';
-        sendBtn.classList.add('recording');
-        sendBtn.title = 'Release to send voice message';
-        sendBtn.setAttribute('aria-label', 'Release to send voice message');
-        
+        // Add recording class to change icon via CSS
+        voiceRecordBtn.classList.add('recording');
+        voiceRecordBtn.title = 'Release to send voice message';
+        voiceRecordBtn.setAttribute('aria-label', 'Release to send voice message');
+
         // Create recording timer element
         const timerElement = document.createElement('div');
         timerElement.className = 'recording-timer';
@@ -1345,12 +1374,12 @@ function updateRecordingUI(show) {
         timerElement.style.fontSize = '12px';
         timerElement.style.zIndex = '10';
         timerElement.style.fontWeight = 'bold';
-        
+
         // Add the timer next to the message input
         const wrapper = messageInput.parentElement;
         wrapper.style.position = 'relative';
         wrapper.appendChild(timerElement);
-        
+
         // Start updating recording time
         recordingTimeUpdateInterval = setInterval(() => {
             if (recordingStartTime) {
@@ -1361,19 +1390,28 @@ function updateRecordingUI(show) {
             }
         }, 1000);
     } else {
-        // Restore original button appearance
-        sendBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>';
-        sendBtn.classList.remove('recording');
-        sendBtn.title = window.i18n ? window.i18n.t('actions.send') : 'Send';
-        sendBtn.setAttribute('aria-label', window.i18n ? window.i18n.t('actions.send') : 'Send');
+        // Remove recording class to restore original icon via CSS
+        voiceRecordBtn.classList.remove('recording');
+        voiceRecordBtn.title = window.i18n ? window.i18n.t('actions.voiceMessage') : 'Voice Message';
+        voiceRecordBtn.setAttribute('aria-label', window.i18n ? window.i18n.t('actions.voiceMessage') : 'Voice Message');
     }
 }
 
-async function sendVoiceMessage(audioBlob) {
+async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
     try {
+        // Determine file extension based on MIME type
+        let fileExtension = 'webm';
+        if (mimeType.includes('ogg')) {
+            fileExtension = 'ogg';
+        } else if (mimeType.includes('mp4')) {
+            fileExtension = 'mp4';
+        } else if (mimeType.includes('webm')) {
+            fileExtension = 'webm';
+        }
+
         // Create a unique filename with voice prefix
-        const fileName = `voice_message_${Date.now()}.webm`;
-        
+        const fileName = `voice_message_${Date.now()}.${fileExtension}`;
+
         // Create form data to send the audio file
         const formData = new FormData();
         formData.append('file', audioBlob, fileName);
@@ -1381,7 +1419,7 @@ async function sendVoiceMessage(audioBlob) {
         formData.append('senderId', currentUser.id);
         formData.append('isVoiceMessage', 'true'); // Flag to identify voice messages
         formData.append('folder', 'voice_messages'); // Specify the folder for voice messages
-        
+
         const response = await fetch(`${getApiUrl()}/api/upload`, {
             method: 'POST',
             headers: {
@@ -1389,13 +1427,13 @@ async function sendVoiceMessage(audioBlob) {
             },
             body: formData
         });
-        
+
         if (!response.ok) {
             throw new Error('Upload failed');
         }
-        
+
         const fileData = await response.json();
-        
+
         // Create message object with voice file
         const message = {
             id: Date.now(),
@@ -1408,7 +1446,7 @@ async function sendVoiceMessage(audioBlob) {
             timestamp: new Date(),
             reactions: []
         };
-        
+
         // If this is a Self Chat, save the message locally
         if (currentDMUserId === currentUser.id) {
             addMessageToUI(message);
@@ -4558,27 +4596,34 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
 
 /* =========================
-   Send button + enter behavior
+   Send button + Voice Record button behavior
    - Enter: send text
    - Shift+Enter: newline
-   - Button click: send text if exists
-   - Button hold: record voice message
+   - Send button click: send text
+   - Voice Record button: hold to record voice message
+   - Toggle visibility based on text presence
    ========================= */
 
 (function(){
   function getEl(id){ return document.getElementById(id); }
 
-  function updateSendState(){
+  function updateButtonVisibility(){
     const input = getEl("messageInput");
-    const btn = getEl("sendBtn");
-    if (!input || !btn) return;
+    const sendBtn = getEl("sendBtn");
+    const voiceRecordBtn = getEl("voiceRecordBtn");
+    if (!input || !sendBtn || !voiceRecordBtn) return;
 
     const hasText = input.value.trim().length > 0;
-    // If we're not recording, enable/disable based on text presence
-    if (!isRecording) {
-      // Always enable the button when there's text, or when there's no text but we want to record voice
-      btn.disabled = false;
-      btn.classList.toggle("ready", hasText);
+
+    // Показываем кнопку отправки когда есть текст, кнопку записи когда нет текста
+    if (hasText) {
+      sendBtn.style.display = 'inline-flex';
+      voiceRecordBtn.style.display = 'none';
+      sendBtn.classList.toggle("ready", true);
+    } else {
+      sendBtn.style.display = 'none';
+      voiceRecordBtn.style.display = 'inline-flex';
+      voiceRecordBtn.classList.remove('recording');
     }
   }
 
@@ -4603,21 +4648,22 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
     }
 
     input.value = "";
-    updateSendState();
+    updateButtonVisibility();
   }
 
-  // Track if we're currently handling a press/hover event
+  // Track if we're currently handling a press/hover event for voice recording
   let isMouseDown = false;
   let isTouchDown = false;
   let pressTimer = null;
-  let pressTimeout = 300; // 300ms threshold for considering it a long press
-  
+  let shouldPreventClick = false;
+
   document.addEventListener("DOMContentLoaded", () => {
     const input = getEl("messageInput");
-    const btn = getEl("sendBtn");
-    if (!input || !btn) return;
+    const sendBtn = getEl("sendBtn");
+    const voiceRecordBtn = getEl("voiceRecordBtn");
+    if (!input || !sendBtn || !voiceRecordBtn) return;
 
-    input.addEventListener("input", updateSendState);
+    input.addEventListener("input", updateButtonVisibility);
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -4626,54 +4672,65 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
       }
     });
 
-    // Voice recording functionality
-    // Add event listeners to the button to ensure full area coverage
-    // Using mousedown for mouse events and touchstart for touch events
-    
-    // For mouse events - attach to the button itself to ensure full area coverage
-    btn.addEventListener("mousedown", (e) => {
+    // Send button click handler
+    sendBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
       e.preventDefault();
-      // Don't use stopPropagation here to allow normal event flow
-      isMouseDown = true;
-
-      // Start timer to determine if it's a long press
-      pressTimer = setTimeout(() => {
-        // Only start recording if there's no text in the input
-        if (!input.value.trim() && !isRecording) {
-          startRecording();
-        }
-      }, pressTimeout);
-    });
-
-    // For touch events - also attach to the button itself
-    btn.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      // Don't use stopPropagation here to allow normal event flow
-      isTouchDown = true;
-
-      // Start timer to determine if it's a long press
-      pressTimer = setTimeout(() => {
-        // Only start recording if there's no text in the input
-        if (!input.value.trim() && !isRecording) {
-          startRecording();
-        }
-      }, pressTimeout);
-    });
-
-    // Handle quick clicks (for sending text when there's text in input)
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      // Only send text message if there's text and not recording
-      if (input.value.trim() && !isRecording) {
+      if (input.value.trim()) {
         trySend();
       }
     });
 
-    // Stop recording when mouse/touch is released anywhere
+    // Voice recording functionality
+    voiceRecordBtn.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      isMouseDown = true;
+      shouldPreventClick = false;
+
+      // Clear any existing timer
+      if (pressTimer) clearTimeout(pressTimer);
+      
+      // Start timer to determine if it's a long press
+      pressTimer = setTimeout(() => {
+        shouldPreventClick = true;
+        if (!isRecording) {
+          startRecording();
+        }
+      }, 100);
+    });
+
+    // For touch events
+    voiceRecordBtn.addEventListener("touchstart", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      isTouchDown = true;
+      shouldPreventClick = false;
+
+      // Clear any existing timer
+      if (pressTimer) clearTimeout(pressTimer);
+      
+      // Start timer to determine if it's a long press
+      pressTimer = setTimeout(() => {
+        shouldPreventClick = true;
+        if (!isRecording) {
+          startRecording();
+        }
+      }, 100);
+    });
+
+    // Prevent click event if we're recording or if it was a long press
+    voiceRecordBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      // Always prevent default click behavior for voice button
+    });
+
+    // Stop recording when mouse/touch is released
     document.addEventListener("mouseup", (e) => {
-      // Check if mouseup occurred outside the button area
-      if (isMouseDown && !btn.contains(e.target)) {
-        // If mouse was pressed and released outside button, cancel recording
+      if (isMouseDown) {
         isMouseDown = false;
         if (pressTimer) {
           clearTimeout(pressTimer);
@@ -4682,25 +4739,18 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
         if (isRecording) {
           stopRecording();
+          shouldPreventClick = true;
         }
-      } else if (isMouseDown) {
-        // If mouse was pressed and released inside button, allow release
-        isMouseDown = false;
-        if (pressTimer) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
-
-        if (isRecording) {
-          stopRecording();
-        }
+        
+        // Reset prevent flag after a short delay
+        setTimeout(() => {
+          shouldPreventClick = false;
+        }, 200);
       }
     });
 
     document.addEventListener("touchend", (e) => {
-      // Check if touchend occurred outside the button area
-      if (isTouchDown && !btn.contains(e.target)) {
-        // If touch was pressed and released outside button, cancel recording
+      if (isTouchDown) {
         isTouchDown = false;
         if (pressTimer) {
           clearTimeout(pressTimer);
@@ -4709,23 +4759,18 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
         if (isRecording) {
           stopRecording();
+          shouldPreventClick = true;
         }
-      } else if (isTouchDown) {
-        // If touch was pressed and released inside button, allow release
-        isTouchDown = false;
-        if (pressTimer) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
-
-        if (isRecording) {
-          stopRecording();
-        }
+        
+        // Reset prevent flag after a short delay
+        setTimeout(() => {
+          shouldPreventClick = false;
+        }, 200);
       }
     });
 
     // Cancel recording if mouse leaves the button area
-    btn.addEventListener("mouseleave", () => {
+    voiceRecordBtn.addEventListener("mouseleave", () => {
       isMouseDown = false;
       if (pressTimer) {
         clearTimeout(pressTimer);
@@ -4734,14 +4779,18 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
       if (isRecording) {
         stopRecording();
+        shouldPreventClick = true;
+        setTimeout(() => {
+          shouldPreventClick = false;
+        }, 200);
       }
     });
 
-    updateSendState();
+    updateButtonVisibility();
   });
 
   // export if you want
-  window.VoxiiSend = { trySend, updateSendState };
+  window.VoxiiSend = { trySend, updateButtonVisibility };
 })();
 
 // Функция для восстановления обработчиков голосовых сообщений

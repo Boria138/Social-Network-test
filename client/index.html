@@ -181,17 +181,23 @@
                         </svg>
                     </button>
 
-                    <!-- ✅ SEND button (added) -->
+                    <!-- Кнопка голосовой записи (показывается когда нет текста) -->
+                    <button type="button"
+                            class="voice-record-btn"
+                            id="voiceRecordBtn"
+                            data-i18n-title="actions.voiceMessage"
+                            title="Voice Message"
+                            aria-label="Voice Message">
+                    </button>
+
+                    <!-- Кнопка отправки текста (показывается когда есть текст) -->
                     <button type="button"
                             class="send-btn"
                             id="sendBtn"
                             data-i18n-title="actions.send"
                             title="Send"
                             aria-label="Send"
-                            disabled>
-                        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
-                        </svg>
+                            style="display: none;">
                     </button>
                 </div>
             </div>

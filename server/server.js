@@ -121,12 +121,13 @@ const upload = multer({
         const allowedMimeTypes = [
             'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
             'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'text/plain', 'audio/mpeg', 'audio/mp3', 'video/mp4', 'video/webm', 'video/quicktime',
+            'text/plain', 'audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/webm', 'audio/opus',
+            'video/mp4', 'video/webm', 'video/quicktime',
             'application/zip', 'application/x-rar-compressed'
         ];
 
         const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.pdf', '.doc', '.docx',
-                                   '.txt', '.mp3', '.mp4', '.webm', '.mov', '.zip', '.rar'];
+                                   '.txt', '.mp3', '.mp4', '.webm', '.mov', '.zip', '.rar', '.ogg', '.opus'];
 
         const ext = path.extname(file.originalname).toLowerCase();
 
