@@ -34,11 +34,14 @@ set -e
 
 APP_DIR="/opt/discord-clone"
 
-# Install Node.js if not present
-if ! command -v node &> /dev/null; then
-    echo "Installing Node.js..."
+# Обновление до Node.js 20 LTS (требуется для зависимостей)
+NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+if [ "$NODE_VERSION" -lt 20 ]; then
+    echo "Updating Node.js 18 -> Node.js 20 LTS..."
     apt-get update
-    apt-get install -y nodejs npm
+    apt-get install -y curl
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y nodejs
 fi
 
 # Install PM2 if not present
@@ -91,7 +94,8 @@ fi
 
 # Install server dependencies
 cd server
-npm install --production
+rm -rf node_modules package-lock.json
+npm install --omit=dev
 
 # Create .env if not exists
 if [ ! -f .env ]; then
