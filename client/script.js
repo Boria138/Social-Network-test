@@ -2252,41 +2252,489 @@ function setupReplyToSelection() {
     });
 }
 
-// Function to parse and format replied messages for display
+// Function to parse and format messages with Markdown support
 function formatQuotedText(text) {
-    // Split text into lines
     const lines = text.split('\n');
     let formattedLines = [];
+    let inList = false;
+    let listType = null;
+    let inCodeBlock = false;
+    let codeBlockContent = [];
+    let codeBlockLanguage = '';
+    let inDetails = false;
+    let detailsContent = [];
+    let inDetailsCodeBlock = false;
+    let detailsCodeBlockContent = [];
+    let detailsCodeBlockLanguage = '';
+    let inDetailsList = false;
+    let detailsListType = null;
+
+    const closeList = () => {
+        if (inList) {
+            formattedLines.push(`</${listType}>`);
+            inList = false;
+            listType = null;
+        }
+    };
+
+    const closeCodeBlock = () => {
+        if (inCodeBlock) {
+            const code = codeBlockContent.join('\n');
+            formattedLines.push(`<pre class="md-code-block"><code class="md-code-block-content language-${codeBlockLanguage}">${escapeHtml(code)}</code></pre>`);
+            inCodeBlock = false;
+            codeBlockContent = [];
+            codeBlockLanguage = '';
+        }
+    };
+
+    const closeDetailsCodeBlock = () => {
+        if (inDetailsCodeBlock) {
+            const code = detailsCodeBlockContent.join('\n');
+            detailsContent.push(`<pre class="md-code-block"><code class="md-code-block-content language-${detailsCodeBlockLanguage}">${escapeHtml(code)}</code></pre>`);
+            inDetailsCodeBlock = false;
+            detailsCodeBlockContent = [];
+            detailsCodeBlockLanguage = '';
+        }
+    };
+
+    const closeDetailsList = () => {
+        if (inDetailsList) {
+            detailsContent.push(`</${detailsListType}>`);
+            inDetailsList = false;
+            detailsListType = null;
+        }
+    };
+
+    const closeDetails = () => {
+        closeDetailsCodeBlock();
+        closeDetailsList();
+        if (inDetails) {
+            const content = detailsContent.join('\n');
+            // Check if summary is already present
+            const hasSummary = content.includes('<summary>');
+            if (hasSummary) {
+                formattedLines.push(`<details>${content}</details>`);
+            } else {
+                formattedLines.push(`<details><summary>Details</summary>${content}</details>`);
+            }
+            inDetails = false;
+            detailsContent = [];
+        }
+    };
+
+    // Security: Block event handlers (onerror, onclick, onload, etc.)
+    const blockEventHandlers = (html) => {
+        return html.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '')
+                   .replace(/\s*on\w+\s*=\s*[^\s>]+/gi, '');
+    };
+
+    // Security: Sanitize style attribute to block dangerous CSS
+    const sanitizeStyle = (style) => {
+        if (!style) return '';
+        // Block javascript:, expression(), url() with javascript/data
+        if (style.toLowerCase().includes('javascript:') ||
+            style.toLowerCase().includes('expression(') ||
+            style.toLowerCase().includes('url(javascript:') ||
+            style.toLowerCase().includes('url(data:')) {
+            return '';
+        }
+        // Only allow safe CSS properties
+        const safeStyles = [];
+        const props = style.split(';');
+        const allowedProps = ['text-align', 'color', 'background', 'background-color', 'font-size', 'font-weight', 'font-style', 'margin', 'padding', 'border', 'width', 'height', 'display', 'text-decoration'];
+        for (const prop of props) {
+            const [name, value] = prop.split(':').map(s => s.trim());
+            if (name && value && allowedProps.includes(name.toLowerCase())) {
+                safeStyles.push(`${name}:${value}`);
+            }
+        }
+        return safeStyles.join(';');
+    };
+
+    // Helper function to sanitize and allow specific HTML tags
+    const allowHtml = (line) => {
+        let result = line;
+
+        // Allow <img> tags with strict sanitization
+        result = result.replace(/<img\s+([^>]*?)\s*\/?>/gi, (match) => {
+            // Block event handlers first
+            match = blockEventHandlers(match);
+
+            const allowedAttrs = ['src', 'alt', 'width', 'height', 'class', 'align'];
+            let newAttrs = [];
+
+            for (const attr of allowedAttrs) {
+                const attrMatch = match.match(new RegExp(`${attr}=["']([^"']*)["']`, 'i'));
+                if (attrMatch) {
+                    let value = attrMatch[1];
+                    // Block javascript: and data: URLs in src
+                    if (attr === 'src') {
+                        if (value.toLowerCase().startsWith('javascript:') ||
+                            value.toLowerCase().startsWith('data:')) {
+                            continue;
+                        }
+                        if (!value.startsWith('http://') &&
+                            !value.startsWith('https://') &&
+                            !value.startsWith('/') &&
+                            !value.startsWith('./')) {
+                            continue;
+                        }
+                    }
+                    newAttrs.push(`${attr}="${value}"`);
+                }
+            }
+
+            if (newAttrs.length === 0) return '';
+            return `<img ${newAttrs.join(' ')}>`;
+        });
+
+        // Allow <a> tags with strict sanitization
+        result = result.replace(/<a\s+([^>]*?)>(.*?)<\/a>/gi, (match, text) => {
+            match = blockEventHandlers(match);
+
+            const hrefMatch = match.match(/href=["']([^"']*)["']/i);
+            if (!hrefMatch) return text;
+            let href = hrefMatch[1];
+
+            const lowerHref = href.toLowerCase().trim();
+            if (lowerHref.startsWith('javascript:') ||
+                lowerHref.startsWith('data:') ||
+                lowerHref.startsWith('vbscript:')) {
+                return text;
+            }
+
+            if (!href.startsWith('http://') &&
+                !href.startsWith('https://') &&
+                !href.startsWith('/') &&
+                !href.startsWith('./') &&
+                !href.startsWith('#')) {
+                return text;
+            }
+
+            return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        });
+
+        // Allow <br> tags (do this early, before other processing)
+        result = result.replace(/<br\s*\/?>/gi, '<br>');
+
+        // Allow <p> tags with sanitized style - process content inside for <br>
+        result = result.replace(/<p(?:\s+[^>]*?)?>(.*?)<\/p>/gi, (match, content) => {
+            const styleMatch = match.match(/style=["']([^"']*)["']/i);
+            const classMatch = match.match(/class=["']([^"']*)["']/i);
+            let attrs = '';
+            if (styleMatch) {
+                const sanitizedStyle = sanitizeStyle(styleMatch[1]);
+                if (sanitizedStyle) attrs += ` style="${sanitizedStyle}"`;
+            }
+            if (classMatch) attrs += ` class="${classMatch[1]}"`;
+            // Process <br> inside content
+            const processedContent = content.replace(/<br\s*\/?>/gi, '<br>');
+            return `<p${attrs}>${processedContent}</p>`;
+        });
+
+        // Allow <div> tags with sanitized style
+        result = result.replace(/<div(?:\s+[^>]*?)?>/gi, (match) => {
+            const styleMatch = match.match(/style=["']([^"']*)["']/i);
+            const classMatch = match.match(/class=["']([^"']*)["']/i);
+            const alignMatch = match.match(/align=["']([^"']*)["']/i);
+            let attrs = '';
+            if (styleMatch) {
+                const sanitizedStyle = sanitizeStyle(styleMatch[1]);
+                if (sanitizedStyle) attrs += ` style="${sanitizedStyle}"`;
+            }
+            if (classMatch) attrs += ` class="${classMatch[1]}"`;
+            if (alignMatch && ['center', 'left', 'right'].includes(alignMatch[1].toLowerCase())) {
+                attrs += ` align="${alignMatch[1]}"`;
+            }
+            return `<div${attrs}>`;
+        });
+        result = result.replace(/<\/div>/gi, '</div>');
+
+        // Allow <b>, <strong>, <i>, <em>, <u>, <s>, <del>
+        result = result.replace(/<(b|strong|i|em|u|s|del)(?:\s+[^>]*?)?>/gi, '<$1>');
+        result = result.replace(/<\/(b|strong|i|em|u|s|del)>/gi, '</$1>');
+
+        // Allow <ul>, <ol>, <li>
+        result = result.replace(/<(ul|ol|li)(?:\s+[^>]*?)?>/gi, '<$1>');
+        result = result.replace(/<\/(ul|ol|li)>/gi, '</$1>');
+
+        // Allow <h1> to <h6>
+        result = result.replace(/<(h[1-6])(?:\s+[^>]*?)?>/gi, '<$1>');
+        result = result.replace(/<\/(h[1-6])>/gi, '</$1>');
+
+        // Allow <code> and <pre>
+        result = result.replace(/<(code|pre)(?:\s+[^>]*?)?>/gi, '<$1>');
+        result = result.replace(/<\/(code|pre)>/gi, '</$1>');
+
+        // Allow <span> with sanitized style
+        result = result.replace(/<span(?:\s+[^>]*?)?>/gi, (match) => {
+            const styleMatch = match.match(/style=["']([^"']*)["']/i);
+            const classMatch = match.match(/class=["']([^"']*)["']/i);
+            let attrs = '';
+            if (styleMatch) {
+                const sanitizedStyle = sanitizeStyle(styleMatch[1]);
+                if (sanitizedStyle) attrs += ` style="${sanitizedStyle}"`;
+            }
+            if (classMatch) attrs += ` class="${classMatch[1]}"`;
+            return `<span${attrs}>`;
+        });
+        result = result.replace(/<\/span>/gi, '</span>');
+
+        // Final pass: remove any remaining event handlers
+        result = blockEventHandlers(result);
+
+        return result;
+    };
+
+    const formatInline = (line) => {
+        let result = escapeHtml(line);
+
+        // Code blocks (inline) `code`
+        result = result.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
+
+        // Bold **text** or __text__
+        result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        result = result.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+        // Italic *text* or _text_
+        result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+        result = result.replace(/(?<!_)_([^_]+)_(?!_)/g, '<em>$1</em>');
+
+        // Strikethrough ~~text~~
+        result = result.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+
+        // Links [text](url)
+        result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+        return result;
+    };
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        const trimmedLine = line.trim();
 
-        // Check if the line is a quoted/replied line
+        // Check for code block start/end ```
+        if (trimmedLine.startsWith('```')) {
+            if (inDetails) {
+                // Code block inside details
+                if (!inDetailsCodeBlock) {
+                    inDetailsCodeBlock = true;
+                    const langMatch = trimmedLine.match(/^```(\w+)?/);
+                    detailsCodeBlockLanguage = langMatch && langMatch[1] ? langMatch[1] : 'plaintext';
+                } else {
+                    closeDetailsCodeBlock();
+                }
+            } else {
+                // Code block outside details
+                if (!inCodeBlock) {
+                    closeList();
+                    inCodeBlock = true;
+                    const langMatch = trimmedLine.match(/^```(\w+)?/);
+                    codeBlockLanguage = langMatch && langMatch[1] ? langMatch[1] : 'plaintext';
+                } else {
+                    closeCodeBlock();
+                }
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            codeBlockContent.push(line);
+            continue;
+        }
+
+        if (inDetailsCodeBlock) {
+            detailsCodeBlockContent.push(line);
+            continue;
+        }
+
+        // Check for <details> start
+        if (trimmedLine.startsWith('<details>')) {
+            closeList();
+            inDetails = true;
+            // Check if summary is on the same line <details><summary>text</summary>
+            const summaryMatch = trimmedLine.match(/<details><summary>(.*?)<\/summary>(.*)?$/i);
+            if (summaryMatch) {
+                detailsContent.push(`<summary>${allowHtml(summaryMatch[1])}</summary>`);
+                // If there's content after summary on the same line
+                if (summaryMatch[2] && summaryMatch[2].trim()) {
+                    const remainingContent = summaryMatch[2].trim();
+                    const hasHtmlTags = /<[a-z][a-z0-9]*(?:\s+[^>]*)?>/i.test(remainingContent);
+                    detailsContent.push(hasHtmlTags ? allowHtml(remainingContent) : formatInline(remainingContent));
+                }
+            }
+            continue;
+        }
+
+        // Check for </details> end (can be at the end of any line)
+        if (trimmedLine.includes('</details>')) {
+            // Close code block and list inside details if open
+            closeDetailsCodeBlock();
+            closeDetailsList();
+            // Get content before </details>
+            const contentBefore = trimmedLine.split('</details>')[0].trim();
+            if (contentBefore) {
+                const hasHtmlTags = /<[a-z][a-z0-9]*(?:\s+[^>]*)?>/i.test(contentBefore);
+                detailsContent.push(hasHtmlTags ? allowHtml(contentBefore) : formatInline(contentBefore));
+            }
+            closeDetails();
+            continue;
+        }
+
+        // If inside details, collect content
+        if (inDetails) {
+            // Check for standalone <summary>line</summary>
+            if (trimmedLine.match(/^<summary>.*<\/summary>$/i)) {
+                const summaryMatch = trimmedLine.match(/<summary>(.*?)<\/summary>/i);
+                if (summaryMatch) {
+                    detailsContent.push(`<summary>${allowHtml(summaryMatch[1])}</summary>`);
+                }
+            } else {
+                // Process markdown inside details
+                let processedLine = trimmedLine;
+                const hasHtmlTags = /<[a-z][a-z0-9]*(?:\s+[^>]*)?>/i.test(line) ||
+                                   /<\/[a-z][a-z0-9]*>/i.test(line);
+                
+                // Check for headers inside details
+                if (trimmedLine.startsWith('### ')) {
+                    closeDetailsList();
+                    processedLine = `<h3>${formatInline(trimmedLine.substring(4))}</h3>`;
+                } else if (trimmedLine.startsWith('## ')) {
+                    closeDetailsList();
+                    processedLine = `<h2>${formatInline(trimmedLine.substring(3))}</h2>`;
+                } else if (trimmedLine.startsWith('# ')) {
+                    closeDetailsList();
+                    processedLine = `<h1>${formatInline(trimmedLine.substring(2))}</h1>`;
+                }
+                // Check for unordered list inside details
+                else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
+                    if (!inDetailsList || detailsListType !== 'ul') {
+                        closeDetailsList();
+                        inDetailsList = true;
+                        detailsListType = 'ul';
+                        detailsContent.push('<ul>');
+                    }
+                    const listContent = trimmedLine.substring(2);
+                    processedLine = `<li>${formatInline(listContent)}</li>`;
+                }
+                // Check for ordered list inside details
+                else if (/^\d+\.\s/.test(trimmedLine)) {
+                    if (!inDetailsList || detailsListType !== 'ol') {
+                        closeDetailsList();
+                        inDetailsList = true;
+                        detailsListType = 'ol';
+                        detailsContent.push('<ol>');
+                    }
+                    const listContent = trimmedLine.replace(/^\d+\.\s/, '');
+                    processedLine = `<li>${formatInline(listContent)}</li>`;
+                }
+                // Empty line or other block element - close list
+                else if (trimmedLine === '' || trimmedLine.startsWith('<')) {
+                    closeDetailsList();
+                    if (trimmedLine) {
+                        processedLine = hasHtmlTags ? allowHtml(trimmedLine) : formatInline(trimmedLine);
+                    }
+                }
+                // Regular line inside details
+                else {
+                    closeDetailsList();
+                    processedLine = hasHtmlTags ? allowHtml(trimmedLine) : formatInline(trimmedLine);
+                }
+                
+                if (processedLine) {
+                    detailsContent.push(processedLine);
+                }
+            }
+            continue;
+        }
+
+        // Empty line
+        if (trimmedLine === '') {
+            closeList();
+            formattedLines.push('<br>');
+            continue;
+        }
+
+        // Check if line contains HTML tags - more permissive to catch all tags including <br>
+        const hasHtmlTags = /<[a-z][a-z0-9]*(?:\s+[^>]*)?\/?>/i.test(line) ||
+                           /<\/[a-z][a-z0-9]*>/i.test(line) ||
+                           /<br\s*\/?>/i.test(line);
+
+        // Quoted lines
         if (line.startsWith('> ')) {
-            // Extract the quoted content
-            let quotedContent = line.substring(2); // Remove '> '
+            closeList();
+            let quotedContent = line.substring(2);
 
-            // Check if it's a formatted quote with author
             if (quotedContent.startsWith('**') && quotedContent.includes('**: ')) {
                 const colonIndex = quotedContent.indexOf('**: ');
                 if (colonIndex !== -1) {
-                    const author = quotedContent.substring(2, colonIndex); // Remove '**'
-                    const quoteText = quotedContent.substring(colonIndex + 4); // Remove '**author**: '
-
-                    formattedLines.push(`<div class="quoted-message"><span class="quote-author">**${escapeHtml(author)}**:</span> ${escapeHtml(quoteText)}</div>`);
+                    const author = quotedContent.substring(2, colonIndex);
+                    const quoteText = quotedContent.substring(colonIndex + 4);
+                    formattedLines.push(`<div class="quoted-message"><span class="quote-author">${escapeHtml(author)}:</span> ${hasHtmlTags ? allowHtml(quoteText) : formatInline(quoteText)}</div>`);
                 } else {
-                    // Simple quote without author
-                    formattedLines.push(`<div class="quoted-message">${escapeHtml(quotedContent)}</div>`);
+                    formattedLines.push(`<div class="quoted-message">${hasHtmlTags ? allowHtml(quotedContent) : formatInline(quotedContent)}</div>`);
                 }
             } else {
-                // Simple quote without author
-                formattedLines.push(`<div class="quoted-message">${escapeHtml(quotedContent)}</div>`);
+                formattedLines.push(`<div class="quoted-message">${hasHtmlTags ? allowHtml(quotedContent) : formatInline(quotedContent)}</div>`);
             }
-        } else {
-            // Regular text line
-            formattedLines.push(escapeHtml(line));
+            continue;
         }
+
+        // Headers
+        const headerMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/);
+        if (headerMatch) {
+            closeList();
+            // Add horizontal rule before header (except if it's the first element)
+            if (formattedLines.length > 0) {
+                formattedLines.push('<hr class="md-hr">');
+            }
+            const level = headerMatch[1].length;
+            const headerText = formatInline(headerMatch[2]);
+            formattedLines.push(`<h${level} class="md-header md-h${level}">${headerText}</h${level}>`);
+            continue;
+        }
+
+        // Unordered lists
+        const ulMatch = trimmedLine.match(/^[\*\-\+]\s+(.+)$/);
+        if (ulMatch) {
+            if (!inList || listType !== 'ul') {
+                closeList();
+                formattedLines.push('<ul class="md-list md-ul">');
+                inList = true;
+                listType = 'ul';
+            }
+            formattedLines.push(`<li class="md-list-item">${formatInline(ulMatch[1])}</li>`);
+            continue;
+        }
+
+        // Ordered lists
+        const olMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
+        if (olMatch) {
+            if (!inList || listType !== 'ol') {
+                closeList();
+                formattedLines.push('<ol class="md-list md-ol">');
+                inList = true;
+                listType = 'ol';
+            }
+            formattedLines.push(`<li class="md-list-item">${formatInline(olMatch[2])}</li>`);
+            continue;
+        }
+
+        // Horizontal rule
+        if (/^(\-{3,}|\*{3,}|_{3,})$/.test(trimmedLine)) {
+            closeList();
+            formattedLines.push('<hr class="md-hr">');
+            continue;
+        }
+
+        // Regular text line
+        closeList();
+        formattedLines.push(`<div class="md-paragraph">${hasHtmlTags ? allowHtml(trimmedLine) : formatInline(trimmedLine)}</div>`);
     }
+
+    closeList();
+    closeCodeBlock();
+    closeDetails();
 
     return formattedLines.join('');
 }
@@ -4070,32 +4518,36 @@ function applyTheme(themeName) {
 function applyAccentColor(color) {
     const root = document.documentElement;
     root.style.setProperty('--accent', color);
-    
+
     // Update accentB to be a lighter version of the accent color
     const accentB = lightenColor(color, 20);
     root.style.setProperty('--accentB', accentB);
-    
+
+    // Update accent-light to be a much lighter version for code
+    const accentLight = lightenColor(color, 60);
+    root.style.setProperty('--accent-light', accentLight);
+
     // Update transparent versions of accent colors
     const transparentAccent = hexToRgba(color, 0.26);
     const transparentAccentB = hexToRgba(accentB, 0.16);
     root.style.setProperty('--accent-transparent', transparentAccent);
     root.style.setProperty('--accentB-transparent', transparentAccentB);
-    
+
     // Update other transparent accent variations
     const transparentAccent20 = hexToRgba(color, 0.20);
     const transparentAccent25 = hexToRgba(color, 0.25);
     const transparentAccent32 = hexToRgba(color, 0.32);
     const transparentAccent18 = hexToRgba(color, 0.18);
-    
+
     root.style.setProperty('--accent-hover-bg', transparentAccent20);
     root.style.setProperty('--accent-border-focus', transparentAccent32);
     root.style.setProperty('--accent-shadow-focus', transparentAccent18);
     root.style.setProperty('--accent-reaction-hover', transparentAccent25);
-    
+
     // Update body background to reflect new accent colors
     const currentTheme = localStorage.getItem('selectedTheme') || 'default';
     updateBodyBackground(currentTheme);
-    
+
     // Also update transparency to ensure all glass effects are consistent
     const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
     setTimeout(() => {

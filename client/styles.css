@@ -38,6 +38,7 @@
 
     --accent: #8b5cf6;   /* violet */
     --accentB: #60a5fa;  /* blue */
+    --accent-light: #e0a8ff;  /* light violet for code */
     --accent-transparent: rgba(139, 92, 246, .26);
     --accentB-transparent: rgba(96, 165, 250, .16);
     --accent-hover-bg: rgba(139, 92, 246, .26);
@@ -608,6 +609,238 @@ body::after{
     word-break: break-word;
     overflow-wrap: break-word;
     white-space: pre-wrap;
+}
+
+.message-text > div:not(.md-paragraph):not(.quoted-message):not(.md-code-block-delimiter) {
+    display: inline;
+    margin: 0;
+    padding: 0;
+}
+
+/* ======= Markdown Styles ======= */
+
+/* Headers */
+.md-header {
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 12px 0 8px 0;
+    line-height: 1.4;
+}
+
+.md-h1 { font-size: 1.5em; }
+.md-h2 { font-size: 1.35em; }
+.md-h3 { font-size: 1.2em; }
+.md-h4 { font-size: 1.1em; }
+.md-h5 { font-size: 1em; }
+.md-h6 { font-size: 0.9em; color: rgba(255, 255, 255, 0.7); }
+
+/* Lists */
+.md-list {
+    margin: 8px 0;
+    padding-left: 24px;
+}
+
+.md-list-item {
+    margin: 4px 0;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+/* Inline code */
+.md-code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    color: var(--accent-light, #e0a8ff);
+}
+
+/* Code block */
+.md-code-block {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-width: 100%;
+}
+
+.md-code-block-content {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.85em;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: pre;
+    display: block;
+}
+
+/* Code block delimiter - hide now */
+.md-code-block-delimiter {
+    display: none;
+}
+
+/* Horizontal rule */
+.md-hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    margin: 16px 0;
+}
+
+/* Paragraph */
+.md-paragraph {
+    display: block;
+    margin: 4px 0;
+}
+
+/* HTML Elements Support */
+.message-text img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 8px 0;
+    display: block;
+}
+
+.message-text img[align="left"] {
+    float: left;
+    margin-right: 16px;
+}
+
+.message-text img[align="right"] {
+    float: right;
+    margin-left: 16px;
+}
+
+.message-text img[align="center"] {
+    margin-left: auto;
+    margin-right: auto;
+    display: block;
+}
+
+.message-text img[align="left"] {
+    float: left;
+    margin-right: 16px;
+}
+
+.message-text img[align="right"] {
+    float: right;
+    margin-left: 16px;
+}
+
+/* Centered div with align attribute */
+.message-text div[align="center"] {
+    text-align: center !important;
+    display: block;
+    width: 100%;
+}
+
+.message-text div[align="left"] {
+    text-align: left !important;
+}
+
+.message-text div[align="right"] {
+    text-align: right !important;
+}
+
+/* Helper classes for alignment */
+.message-text .text-center {
+    text-align: center !important;
+}
+
+.message-text .text-left {
+    text-align: left !important;
+}
+
+.message-text .text-right {
+    text-align: right !important;
+}
+
+/* Centered content wrapper */
+.message-text .centered-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+.message-text details {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 12px 0;
+}
+
+.message-text summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--accent);
+    padding: 4px 8px;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+}
+
+/* Custom arrow for summary */
+.message-text summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 8px;
+    font-size: 0.8em;
+    transition: transform 0.2s;
+    color: var(--accent);
+}
+
+.message-text summary:hover {
+    color: var(--accent-hover);
+}
+
+.message-text summary:hover::before {
+    color: var(--accent-hover);
+}
+
+/* Rotate arrow when open */
+.message-text details[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.message-text details[open] summary {
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 12px;
+}
+
+/* Hide default marker in webkit browsers */
+.message-text summary::-webkit-details-marker {
+    display: none;
+}
+
+.message-text a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.message-text a:hover {
+    text-decoration: underline;
+}
+
+/* Strong and Em */
+.message-text strong {
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.message-text em {
+    font-style: italic;
+}
+
+.message-text del {
+    text-decoration: line-through;
+    color: rgba(255, 255, 255, 0.5);
 }
 
 /* Quoted message styles */
