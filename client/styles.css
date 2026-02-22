@@ -821,11 +821,13 @@ body::after{
 
 .message-text a {
     color: var(--accent);
-    text-decoration: none;
+    text-decoration: underline;
+    word-break: break-word;
 }
 
 .message-text a:hover {
     text-decoration: underline;
+    opacity: 0.8;
 }
 
 /* Strong and Em */

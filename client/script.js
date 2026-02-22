@@ -2506,6 +2506,9 @@ function formatQuotedText(text) {
         // Links [text](url)
         result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
+        // Plain URLs (https://... or http://...)
+        result = result.replace(/(?<!href="|href='|">|'>)(https?:\/\/[^\s<]+[^\s<.,;:!?])/gi, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+
         return result;
     };
 
