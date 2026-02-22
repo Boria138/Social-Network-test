@@ -31,6 +31,11 @@ let isRecording = false;
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordingStartTime = null;
+
+// Link preview settings
+let linkPreviewEnabled = true;
+const hiddenPreviews = new Set();
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     token = localStorage.getItem('token');
@@ -62,6 +67,7 @@ function initializeApp() {
     initializeFileUpload();
     initializeEmojiPicker();
     initializeDraggableCallWindow();
+    initializeSettingsModal();
     connectToSocketIO();
     // requestNotificationPermission(); // Убрано из автозапуска
     showFriendsView();
@@ -80,7 +86,7 @@ function initializeApp() {
 
     // Setup reply to selection functionality
     setupReplyToSelection();
-    
+
     // Restore voice message handlers after initialization
     setTimeout(() => {
         restoreVoiceMessageHandlers();
@@ -1988,7 +1994,11 @@ function addMessageToUI(message) {
     if (typeof twemoji !== 'undefined') {
         twemoji.parse(messageGroup);
     }
-    
+
+    // Add link previews for URLs in the message
+    const messageId = message.id || Date.now();
+    addLinkPreviews(messageId, message.text, text);
+
     // Restore voice message handlers after adding the message
     setTimeout(() => {
         restoreVoiceMessageHandlers();
@@ -2752,6 +2762,164 @@ function escapeHtml(text) {
         .replace(/'/g, '&#039;');
 }
 
+// Link Preview functions
+function extractUrls(text) {
+    const urlRegex = /https?:\/\/[^\s<]+[^\s<.,;:!?]/gi;
+    const matches = text.match(urlRegex);
+    if (!matches) return [];
+    
+    // Remove duplicates and filter out URLs from markdown links
+    const uniqueUrls = [...new Set(matches)];
+    return uniqueUrls.filter(url => {
+        // Filter out URLs that are already in markdown format [text](url)
+        const markdownPattern = new RegExp(`\\[[^\\]]+\\]\\(${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'i');
+        return !markdownPattern.test(text);
+    });
+}
+
+async function fetchLinkPreview(url) {
+    try {
+        const response = await fetch(`${getApiUrl()}/api/link-preview?url=${encodeURIComponent(url)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch preview');
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching link preview:', error);
+        return null;
+    }
+}
+
+function createLinkPreviewCard(metadata, messageId, url) {
+    const container = document.createElement('div');
+    container.className = 'link-preview-container';
+    container.setAttribute('data-preview-url', url);
+    
+    const hideBtn = document.createElement('button');
+    hideBtn.className = 'link-preview-hide';
+    hideBtn.textContent = '✕';
+    hideBtn.title = 'Hide preview';
+    hideBtn.onclick = () => hideLinkPreview(messageId, url);
+    
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'link-preview';
+    
+    if (metadata.image) {
+        previewDiv.classList.add('has-image');
+        previewDiv.innerHTML = `
+            <img class="link-preview-image" src="${escapeHtml(metadata.image)}" alt="" onerror="this.style.display='none'">
+            <div class="link-preview-content">
+                ${metadata.siteName || metadata.favicon ? `
+                    <div class="link-preview-site">
+                        ${metadata.favicon ? `<img class="link-preview-favicon" src="${escapeHtml(metadata.favicon)}" alt="" onerror="this.style.display='none'">` : ''}
+                        ${metadata.siteName ? `<span>${escapeHtml(metadata.siteName)}</span>` : ''}
+                    </div>
+                ` : ''}
+                <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="link-preview-title">
+                    ${escapeHtml(metadata.title) || escapeHtml(url)}
+                </a>
+                ${metadata.description ? `<p class="link-preview-description">${escapeHtml(metadata.description)}</p>` : ''}
+            </div>
+        `;
+    } else {
+        previewDiv.innerHTML = `
+            <div class="link-preview-no-image">🔗</div>
+            <div class="link-preview-content">
+                ${metadata.siteName || metadata.favicon ? `
+                    <div class="link-preview-site">
+                        ${metadata.favicon ? `<img class="link-preview-favicon" src="${escapeHtml(metadata.favicon)}" alt="" onerror="this.style.display='none'">` : ''}
+                        ${metadata.siteName ? `<span>${escapeHtml(metadata.siteName)}</span>` : ''}
+                    </div>
+                ` : ''}
+                <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="link-preview-title">
+                    ${escapeHtml(metadata.title) || escapeHtml(url)}
+                </a>
+                ${metadata.description ? `<p class="link-preview-description">${escapeHtml(metadata.description)}</p>` : ''}
+            </div>
+        `;
+    }
+    
+    container.appendChild(hideBtn);
+    container.appendChild(previewDiv);
+    
+    return container;
+}
+
+function createLinkPreviewLoading() {
+    const container = document.createElement('div');
+    container.className = 'link-preview-loading';
+    container.innerHTML = `
+        <div class="link-preview-loading-spinner"></div>
+        <span>Loading preview...</span>
+    `;
+    return container;
+}
+
+function hideLinkPreview(messageId, url) {
+    const previewKey = `${messageId}-${url}`;
+    hiddenPreviews.add(previewKey);
+    localStorage.setItem('hiddenPreviews', JSON.stringify([...hiddenPreviews]));
+    
+    // Hide the preview in UI
+    const previewContainer = document.querySelector(`[data-preview-url="${url}"]`);
+    if (previewContainer) {
+        previewContainer.style.display = 'none';
+    }
+}
+
+function loadHiddenPreviews() {
+    try {
+        const stored = localStorage.getItem('hiddenPreviews');
+        if (stored) {
+            const hidden = JSON.parse(stored);
+            hidden.forEach(key => hiddenPreviews.add(key));
+        }
+    } catch (e) {
+        console.error('Error loading hidden previews:', e);
+    }
+}
+
+async function addLinkPreviews(messageId, messageText, messageElement) {
+    if (!linkPreviewEnabled) return;
+    
+    const urls = extractUrls(messageText);
+    if (urls.length === 0) return;
+    
+    // Load hidden previews from storage
+    loadHiddenPreviews();
+    
+    // Get only the first URL that is not hidden
+    let firstValidUrl = null;
+    let previewKey = null;
+    
+    for (const url of urls) {
+        const key = `${messageId}-${url}`;
+        if (!hiddenPreviews.has(key)) {
+            firstValidUrl = url;
+            previewKey = key;
+            break;
+        }
+    }
+    
+    if (!firstValidUrl) return;
+    
+    // Create loading indicator
+    const loadingEl = createLinkPreviewLoading();
+    messageElement.appendChild(loadingEl);
+    
+    // Fetch preview for the first URL only
+    const metadata = await fetchLinkPreview(firstValidUrl);
+    
+    // Remove loading indicator
+    messageElement.removeChild(loadingEl);
+    
+    if (metadata && !metadata.error) {
+        const previewCard = createLinkPreviewCard(metadata, messageId, firstValidUrl);
+        messageElement.appendChild(previewCard);
+    }
+    // If error, don't show anything (silently fail)
+}
+
 function scrollToBottom() {
     const messagesContainer = document.getElementById('messagesContainer');
     if (messagesContainer) {
@@ -3224,6 +3392,78 @@ function initializeUserControls() {
 
     if (settingsBtn) {
         settingsBtn.addEventListener('click', () => {
+            openSettingsModal();
+        });
+    }
+}
+
+// Settings Modal functions
+function openSettingsModal() {
+    const modal = document.getElementById('settingsModal');
+    if (!modal) return;
+    
+    // Load current settings
+    loadSettings();
+    
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeSettingsModal() {
+    const modal = document.getElementById('settingsModal');
+    if (!modal) return;
+    
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function loadSettings() {
+    const linkPreviewToggle = document.getElementById('linkPreviewToggle');
+    if (linkPreviewToggle) {
+        // Load from localStorage
+        const saved = localStorage.getItem('linkPreviewEnabled');
+        linkPreviewToggle.checked = saved !== 'false';
+        linkPreviewEnabled = linkPreviewToggle.checked;
+    }
+}
+
+function initializeSettingsModal() {
+    const closeBtn = document.getElementById('closeSettingsModal');
+    const linkPreviewToggle = document.getElementById('linkPreviewToggle');
+    const clearHiddenPreviewsBtn = document.getElementById('clearHiddenPreviewsBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeSettingsModal);
+    }
+    
+    // Close modal on outside click
+    const modal = document.getElementById('settingsModal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeSettingsModal();
+            }
+        });
+    }
+    
+    if (linkPreviewToggle) {
+        linkPreviewToggle.addEventListener('change', (e) => {
+            linkPreviewEnabled = e.target.checked;
+            localStorage.setItem('linkPreviewEnabled', linkPreviewEnabled.toString());
+        });
+    }
+    
+    if (clearHiddenPreviewsBtn) {
+        clearHiddenPreviewsBtn.addEventListener('click', () => {
+            hiddenPreviews.clear();
+            localStorage.removeItem('hiddenPreviews');
+            alert('All hidden previews have been reset');
+        });
+    }
+    
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
             if (confirm('Do you want to logout?')) {
                 if (inCall) leaveVoiceChannel();
                 localStorage.removeItem('token');

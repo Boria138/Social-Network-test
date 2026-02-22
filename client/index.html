@@ -337,6 +337,47 @@
         </div>
     </div>
 
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="settings-modal" aria-hidden="true">
+        <div class="settings-modal-content">
+            <div class="settings-modal-header">
+                <h2 data-i18n="settings.title">Settings</h2>
+                <button type="button" class="settings-modal-close" id="closeSettingsModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="settings-modal-body">
+                <div class="settings-section">
+                    <h3 data-i18n="settings.privacy">Privacy & Content</h3>
+                    
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <span class="setting-label" data-i18n="settings.linkPreview">Link Previews</span>
+                            <span class="setting-description" data-i18n="settings.linkPreviewDesc">Show preview cards for links in messages</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="linkPreviewToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <button type="button" id="clearHiddenPreviewsBtn" class="setting-btn" data-i18n="settings.clearHiddenPreviews">
+                            Reset Hidden Previews
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3 data-i18n="settings.account">Account</h3>
+                    <div class="setting-item">
+                        <button type="button" id="logoutBtn" class="setting-btn danger" data-i18n="settings.logout">
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- App scripts -->
     <script defer src="config.js"></script>
     <script defer src="script.js"></script>

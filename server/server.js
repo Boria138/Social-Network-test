@@ -10,6 +10,7 @@ const bcrypt = require('bcrypt');
 const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
+const { JSDOM } = require('jsdom');
 
 const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, sessionDB } = require('./database');
 
@@ -144,6 +145,146 @@ initializeDatabase();
 // Start session cleanup
 sessionDB.cleanup();
 
+// Link Preview API - fetch Open Graph metadata from URL
+app.get('/api/link-preview', async (req, res) => {
+    const { url } = req.query;
+
+    if (!url || !url.startsWith('http')) {
+        return res.status(400).json({ error: 'Valid URL required' });
+    }
+
+    try {
+        // Security: Block private IP ranges
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname.toLowerCase();
+        
+        // Block localhost and private IPs
+        if (hostname === 'localhost' || 
+            hostname === '127.0.0.1' ||
+            hostname.match(/^10\./) ||
+            hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./) ||
+            hostname.match(/^192\.168\./) ||
+            hostname.match(/^169\.254\./)) {
+            return res.status(403).json({ error: 'Access to private URLs is not allowed' });
+        }
+
+        const response = await new Promise((resolve, reject) => {
+            const client = url.startsWith('https') ? https : http;
+            const request = client.get(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
+                    'Accept': 'text/html',
+                },
+                timeout: 10000,
+                maxRedirects: 5
+            }, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve({ statusCode: res.statusCode, data }));
+            });
+
+            request.on('error', reject);
+            request.on('timeout', () => {
+                request.destroy();
+                reject(new Error('Request timeout'));
+            });
+        });
+
+        if (response.statusCode !== 200) {
+            return res.status(404).json({ error: 'Failed to fetch URL' });
+        }
+
+        // Limit response size
+        const MAX_SIZE = 500 * 1024; // 500KB
+        if (response.data.length > MAX_SIZE) {
+            response.data = response.data.substring(0, MAX_SIZE);
+        }
+
+        const dom = new JSDOM(response.data);
+        const doc = dom.window.document;
+
+        const metadata = {
+            url: url,
+            title: '',
+            description: '',
+            image: '',
+            siteName: '',
+            favicon: ''
+        };
+
+        // Open Graph tags
+        const ogTitle = doc.querySelector('meta[property="og:title"]');
+        if (ogTitle) metadata.title = ogTitle.getAttribute('content') || '';
+
+        const ogDesc = doc.querySelector('meta[property="og:description"]');
+        if (ogDesc) metadata.description = ogDesc.getAttribute('content') || '';
+
+        const ogImage = doc.querySelector('meta[property="og:image"]');
+        if (ogImage) {
+            let imgUrl = ogImage.getAttribute('content') || '';
+            if (imgUrl && imgUrl.startsWith('/')) {
+                imgUrl = urlObj.origin + imgUrl;
+            }
+            metadata.image = imgUrl;
+        }
+
+        const ogSiteName = doc.querySelector('meta[property="og:site_name"]');
+        if (ogSiteName) metadata.siteName = ogSiteName.getAttribute('content') || '';
+
+        // Twitter Card tags (fallback)
+        if (!metadata.title) {
+            const twitterTitle = doc.querySelector('meta[name="twitter:title"]');
+            if (twitterTitle) metadata.title = twitterTitle.getAttribute('content') || '';
+        }
+        if (!metadata.description) {
+            const twitterDesc = doc.querySelector('meta[name="twitter:description"]');
+            if (twitterDesc) metadata.description = twitterDesc.getAttribute('content') || '';
+        }
+        if (!metadata.image) {
+            const twitterImage = doc.querySelector('meta[name="twitter:image"]');
+            if (twitterImage) {
+                let imgUrl = twitterImage.getAttribute('content') || '';
+                if (imgUrl && imgUrl.startsWith('/')) {
+                    imgUrl = urlObj.origin + imgUrl;
+                }
+                metadata.image = imgUrl;
+            }
+        }
+
+        // Fallback to regular meta tags
+        if (!metadata.title) {
+            const metaTitle = doc.querySelector('meta[name="title"]');
+            if (metaTitle) metadata.title = metaTitle.getAttribute('content') || '';
+        }
+        if (!metadata.title) {
+            const docTitle = doc.querySelector('title');
+            if (docTitle) metadata.title = docTitle.textContent.trim() || '';
+        }
+        if (!metadata.description) {
+            const metaDesc = doc.querySelector('meta[name="description"]');
+            if (metaDesc) metadata.description = metaDesc.getAttribute('content') || '';
+        }
+
+        // Favicon
+        const favicon = doc.querySelector('link[rel="icon"]') || doc.querySelector('link[rel="shortcut icon"]');
+        if (favicon) {
+            let faviconUrl = favicon.getAttribute('href') || '';
+            if (faviconUrl) {
+                if (faviconUrl.startsWith('/')) {
+                    faviconUrl = urlObj.origin + faviconUrl;
+                } else if (!faviconUrl.startsWith('http')) {
+                    faviconUrl = urlObj.origin + '/' + faviconUrl;
+                }
+                metadata.favicon = faviconUrl;
+            }
+        }
+
+        res.json(metadata);
+    } catch (error) {
+        console.error('Link preview error:', error.message);
+        res.status(500).json({ error: 'Failed to fetch link preview' });
+    }
+});
 
 // API Routes
 
