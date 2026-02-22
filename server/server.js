@@ -519,7 +519,8 @@ io.on('connection', async (socket) => {
             const savedMessage = await dmDB.create(
                 messageText,
                 socket.userId,
-                receiverId
+                receiverId,
+                message.timestamp
             );
 
             // Если сообщение содержит файл, обновляем запись файла, чтобы она указывала на ID сообщения
@@ -535,7 +536,7 @@ io.on('connection', async (socket) => {
                 author: sender.username,
                 avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
                 text: message.text,
-                timestamp: new Date(),
+                timestamp: message.timestamp,
                 reactions: reactions,
                 file: message.file  // Добавляем информацию о файле, если она есть
             };

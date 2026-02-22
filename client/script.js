@@ -1443,7 +1443,7 @@ async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
             file: fileData,
             isVoiceMessage: true, // Mark as voice message
             duration: null, // Will be set when audio metadata is loaded
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(), // отправляем в UTC
             reactions: []
         };
 
@@ -1502,7 +1502,7 @@ function sendMessage() {
         text: text,
         author: currentUser.username,
         avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(), // отправляем в UTC
         reactions: []
     };
 
@@ -3129,7 +3129,7 @@ async function uploadFile(file) {
             avatar: currentUser.avatar,
             text: '', // Убираем текст "Uploaded [filename]"
             file: fileData,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(), // отправляем в UTC
             reactions: []
         };
 

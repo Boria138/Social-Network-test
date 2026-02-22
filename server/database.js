@@ -156,10 +156,11 @@ const userDB = {
 
 // Direct message operations
 const dmDB = {
-    create: (content, senderId, receiverId) => {
-        const stmt = db.prepare('INSERT INTO direct_messages (content, original_content, sender_id, receiver_id) VALUES (?, ?, ?, ?)');
-        const result = stmt.run(content, content, senderId, receiverId);
-        return Promise.resolve({ id: result.lastInsertRowid, content, senderId, receiverId });
+    create: (content, senderId, receiverId, timestamp = null) => {
+        const stmt = db.prepare('INSERT INTO direct_messages (content, original_content, sender_id, receiver_id, created_at) VALUES (?, ?, ?, ?, ?)');
+        const ts = timestamp || new Date().toISOString();
+        const result = stmt.run(content, content, senderId, receiverId, ts);
+        return Promise.resolve({ id: result.lastInsertRowid, content, senderId, receiverId, created_at: ts });
     },
 
     getConversation: (userId1, userId2, limit = 50) => {
