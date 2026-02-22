@@ -41,13 +41,15 @@ function initializeDatabase() {
             content TEXT NOT NULL,
             sender_id INTEGER,
             receiver_id INTEGER,
+            reply_to_id INTEGER,
             read BOOLEAN DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             is_edited BOOLEAN DEFAULT FALSE,
             original_content TEXT,
             FOREIGN KEY (sender_id) REFERENCES users(id),
-            FOREIGN KEY (receiver_id) REFERENCES users(id)
+            FOREIGN KEY (receiver_id) REFERENCES users(id),
+            FOREIGN KEY (reply_to_id) REFERENCES direct_messages(id)
         )
     `);
 
@@ -122,6 +124,17 @@ function initializeDatabase() {
     `);
 
     console.log('Database initialized successfully');
+    
+    // Миграция: добавляем поле reply_to_id если его нет
+    try {
+        db.exec('ALTER TABLE direct_messages ADD COLUMN reply_to_id INTEGER REFERENCES direct_messages(id)');
+        console.log('Migration: Added reply_to_id column to direct_messages');
+    } catch (error) {
+        // Игнорируем ошибку, если колонка уже существует
+        if (!error.message.includes('duplicate column')) {
+            console.error('Migration error:', error);
+        }
+    }
 }
 
 // User operations
@@ -156,18 +169,22 @@ const userDB = {
 
 // Direct message operations
 const dmDB = {
-    create: (content, senderId, receiverId, timestamp = null) => {
-        const stmt = db.prepare('INSERT INTO direct_messages (content, original_content, sender_id, receiver_id, created_at) VALUES (?, ?, ?, ?, ?)');
+    create: (content, senderId, receiverId, timestamp = null, replyToId = null) => {
+        const stmt = db.prepare('INSERT INTO direct_messages (content, original_content, sender_id, receiver_id, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?)');
         const ts = timestamp || new Date().toISOString();
-        const result = stmt.run(content, content, senderId, receiverId, ts);
-        return Promise.resolve({ id: result.lastInsertRowid, content, senderId, receiverId, created_at: ts });
+        const result = stmt.run(content, content, senderId, receiverId, replyToId, ts);
+        return Promise.resolve({ id: result.lastInsertRowid, content, senderId, receiverId, reply_to_id: replyToId, created_at: ts });
     },
 
     getConversation: (userId1, userId2, limit = 50) => {
         const stmt = db.prepare(`
-            SELECT dm.*, u.username, u.avatar
+            SELECT dm.*, u.username, u.avatar,
+                   reply_dm.content as reply_to_content,
+                   reply_sender.username as reply_to_author
             FROM direct_messages dm
             JOIN users u ON dm.sender_id = u.id
+            LEFT JOIN direct_messages reply_dm ON dm.reply_to_id = reply_dm.id
+            LEFT JOIN users reply_sender ON reply_dm.sender_id = reply_sender.id
             WHERE (dm.sender_id = ? AND dm.receiver_id = ?)
                OR (dm.sender_id = ? AND dm.receiver_id = ?)
             ORDER BY dm.created_at DESC
@@ -177,13 +194,27 @@ const dmDB = {
         const processedRows = rows.map(row => ({
             ...row,
             edited: Boolean(row.is_edited),
-            originalContent: row.is_edited ? row.original_content : undefined
+            originalContent: row.is_edited ? row.original_content : undefined,
+            replyTo: row.reply_to_id ? {
+                id: row.reply_to_id,
+                author: row.reply_to_author,
+                text: row.reply_to_content
+            } : null
         }));
         return Promise.resolve(processedRows.reverse());
     },
 
     getById: (messageId) => {
-        const stmt = db.prepare('SELECT *, CASE WHEN is_edited THEN original_content ELSE NULL END AS originalContent FROM direct_messages WHERE id = ?');
+        const stmt = db.prepare(`
+            SELECT dm.*,
+                   CASE WHEN dm.is_edited THEN dm.original_content ELSE NULL END AS originalContent,
+                   reply_dm.content as reply_to_content,
+                   reply_sender.username as reply_to_author
+            FROM direct_messages dm
+            LEFT JOIN direct_messages reply_dm ON dm.reply_to_id = reply_dm.id
+            LEFT JOIN users reply_sender ON reply_dm.sender_id = reply_sender.id
+            WHERE dm.id = ?
+        `);
         return Promise.resolve(stmt.get(messageId));
     },
 

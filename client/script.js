@@ -84,8 +84,7 @@ function initializeApp() {
     document.addEventListener('click', requestNotificationPermissionOnce, { once: true });
     document.addEventListener('keydown', requestNotificationPermissionOnce, { once: true });
 
-    // Setup reply to selection functionality
-    setupReplyToSelection();
+    // Setup reply to selection functionality - перенесено в reply-system.js
 
     // Restore voice message handlers after initialization
     setTimeout(() => {
@@ -152,7 +151,7 @@ function connectToSocketIO() {
                     const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
                     isVoiceMessage = audioExtensions.includes(fileExtension);
                 }
-                
+
                 addMessageToUI({
                     id: data.message.id,
                     author: data.message.author,
@@ -162,7 +161,8 @@ function connectToSocketIO() {
                     reactions: data.message.reactions || [],
                     file: data.message.file,  // Добавляем информацию о файле, если она есть
                     isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
-                    edited: data.message.edited  // Добавляем флаг редактирования, если есть
+                    edited: data.message.edited,  // Добавляем флаг редактирования, если есть
+                    replyTo: data.message.replyTo || null  // Добавляем информацию об ответе
                 });
                 scrollToBottom();
             }
@@ -178,7 +178,7 @@ function connectToSocketIO() {
                     const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
                     isVoiceMessage = audioExtensions.includes(fileExtension);
                 }
-                
+
                 // Добавляем сообщение, которое мы отправили
                 addMessageToUI({
                     id: data.message.id,
@@ -189,7 +189,8 @@ function connectToSocketIO() {
                     reactions: data.message.reactions || [],
                     file: data.message.file,  // Добавляем информацию о файле, если она есть
                     isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
-                    edited: data.message.edited  // Добавляем флаг редактирования, если есть
+                    edited: data.message.edited,  // Добавляем флаг редактирования, если есть
+                    replyTo: data.message.replyTo || null  // Добавляем информацию об ответе
                 });
                 scrollToBottom();
             }
@@ -1242,7 +1243,12 @@ function initializeMessageInput() {
     messageInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            // Используем новую функцию отправки с поддержкой ответов
+            if (typeof window.sendMessageWithReply === 'function') {
+                window.sendMessageWithReply();
+            } else {
+                sendMessage();
+            }
         }
 
         // Автоматическое изменение высоты при вводе текста
@@ -1503,13 +1509,25 @@ function sendMessage() {
         return;
     }
 
+    // Получаем текущий ответ (если есть)
+    const currentReplyTo = typeof window._getCurrentReplyTo === 'function' 
+        ? window._getCurrentReplyTo() 
+        : null;
+
     const message = {
         id: Date.now(), // используем временную метку как ID
         text: text,
         author: currentUser.username,
         avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
         timestamp: new Date().toISOString(), // отправляем в UTC
-        reactions: []
+        reactions: [],
+        replyTo: currentReplyTo ? {
+            id: currentReplyTo.id,
+            author: currentReplyTo.author,
+            text: currentReplyTo.text,
+            isVoiceMessage: currentReplyTo.isVoiceMessage,
+            file: currentReplyTo.file
+        } : null
     };
 
     // Если это Self Chat, сохраняем сообщение локально
@@ -1531,6 +1549,11 @@ function sendMessage() {
     // Сбрасываем высоту textarea после отправки
     messageInput.style.height = 'auto';
     adjustTextareaHeight(messageInput);
+    
+    // Очищаем ответ после отправки
+    if (typeof window._clearCurrentReplyTo === 'function') {
+        window._clearCurrentReplyTo();
+    }
 }
 
 function addMessageToUI(message) {
@@ -1588,6 +1611,54 @@ function addMessageToUI(message) {
 
     // Set the HTML content to display formatted quotes
     text.innerHTML = processedText;
+
+    // Add reply block if this message is a reply to another message
+    let replyBlock = null;
+    if (message.replyTo) {
+        replyBlock = document.createElement('div');
+        replyBlock.className = 'message-reply-block';
+        replyBlock.onclick = () => {
+            if (typeof window._scrollToMessage === 'function') {
+                window._scrollToMessage(message.replyTo.id);
+            }
+        };
+
+        // Determine icon based on message type
+        let icon = '↪';
+        let previewText = message.replyTo.text || '';
+
+        if (message.replyTo.isVoiceMessage) {
+            icon = '🎤';
+            previewText = 'Голосовое сообщение';
+        } else if (message.replyTo.file) {
+            icon = '📎';
+            previewText = `Файл: ${message.replyTo.file.filename}`;
+        } else {
+            // Strip markdown for preview
+            previewText = previewText
+                .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                .replace(/`([^`]+)`/g, '$1')
+                .replace(/\*\*([^*]+)\*\*/g, '$1')
+                .replace(/\*([^*]+)\*/g, '$1')
+                .replace(/~~([^~]+)~~/g, '$1')
+                .substring(0, 100) + (previewText.length > 100 ? '…' : '');
+        }
+
+        replyBlock.innerHTML = `
+            <span class="reply-icon">${icon}</span>
+            <span class="reply-author">${escapeHtml(message.replyTo.author)}</span>
+            <span class="reply-separator">:</span>
+            <span class="reply-text">${escapeHtml(previewText)}</span>
+        `;
+    }
+
+    // Add elements to content in correct order: reply block first, then header, then text
+    if (replyBlock) {
+        content.appendChild(replyBlock);
+    }
+    content.appendChild(header);
+    content.appendChild(text);
 
     // Handle voice messages separately from file attachments
     if (message.isVoiceMessage && message.file) {
@@ -2039,28 +2110,19 @@ function formatTimestamp(date) {
 }
 
 
-// Function to reply to a message
+// Function to reply to a message - использует новую систему ответов из reply-system.js
 function replyToMessage(message) {
-    const messageInput = document.getElementById('messageInput');
-
-    if (!messageInput) {
-        console.error('Message input element not found');
-        return;
+    // Новая система ответов: показываем превью над полем ввода вместо цитат
+    if (typeof window._replyToMessageInternal === 'function') {
+        window._replyToMessageInternal(message);
+    } else {
+        // Fallback: просто фокус на input
+        console.warn('Reply system not loaded, using fallback');
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            messageInput.focus();
+        }
     }
-
-    // Format the reply message
-    const replyText = `> **${message.author}**: ${message.text}\n\n`;
-
-    // Insert the reply text at the beginning of the input
-    const currentValue = messageInput.value;
-    messageInput.value = replyText + currentValue;
-
-    // Focus the input and move cursor to the end
-    messageInput.focus();
-    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
-
-    // Adjust textarea height
-    adjustTextareaHeight(messageInput);
 }
 
 // Function to edit a message
@@ -2194,73 +2256,8 @@ function deleteMessageFromUI(messageId) {
     }, 50);
 }
 
-// Function to handle reply to selected text
-function setupReplyToSelection() {
-    document.addEventListener('mouseup', function() {
-        const selection = window.getSelection();
-        if (selection.toString().trim() !== '') {
-            // Create a temporary button to allow replying to selection
-            const range = selection.getRangeAt(0);
-            const rect = range.getBoundingClientRect();
-
-            // Create reply button for selection
-            const replyButton = document.createElement('button');
-            replyButton.className = 'reply-selection-btn';
-            replyButton.textContent = '↪';
-            replyButton.title = 'Reply to selection';
-            replyButton.style.position = 'fixed';
-            replyButton.style.left = rect.left + 'px';
-            replyButton.style.top = (rect.top - 30) + 'px';
-            replyButton.style.zIndex = '1000';
-            replyButton.style.background = 'var(--accent)';
-            replyButton.style.color = 'white';
-            replyButton.style.border = 'none';
-            replyButton.style.borderRadius = '50%';
-            replyButton.style.width = '30px';
-            replyButton.style.height = '30px';
-            replyButton.style.cursor = 'pointer';
-
-            replyButton.onclick = function() {
-                const selectedText = selection.toString();
-                const messageInput = document.getElementById('messageInput');
-
-                if (messageInput) {
-                    // Find the message that contains the selection
-                    const messageElement = selection.anchorNode.parentElement.closest('.message-group');
-                    let author = 'Unknown';
-
-                    if (messageElement) {
-                        const authorElement = messageElement.querySelector('.message-author');
-                        if (authorElement) {
-                            author = authorElement.textContent;
-                        }
-                    }
-
-                    // Format the reply to selection
-                    const replyText = `> **${author}**: ${selectedText}\n\n`;
-
-                    const currentValue = messageInput.value;
-                    messageInput.value = replyText + currentValue;
-
-                    messageInput.focus();
-                    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
-                    adjustTextareaHeight(messageInput);
-                }
-
-                document.body.removeChild(replyButton);
-            };
-
-            document.body.appendChild(replyButton);
-
-            // Remove button after a short time
-            setTimeout(() => {
-                if (replyButton.parentNode) {
-                    document.body.removeChild(replyButton);
-                }
-            }, 3000);
-        }
-    });
-}
+// Function to handle reply to selected text - перенесено в reply-system.js
+// setupReplyToSelection теперь определяется в reply-system.js
 
 // Function to parse and format messages with Markdown support
 function formatQuotedText(text) {
@@ -2673,25 +2670,9 @@ function formatQuotedText(text) {
                            /<\/[a-z][a-z0-9]*>/i.test(line) ||
                            /<br\s*\/?>/i.test(line);
 
-        // Quoted lines
-        if (line.startsWith('> ')) {
-            closeList();
-            let quotedContent = line.substring(2);
-
-            if (quotedContent.startsWith('**') && quotedContent.includes('**: ')) {
-                const colonIndex = quotedContent.indexOf('**: ');
-                if (colonIndex !== -1) {
-                    const author = quotedContent.substring(2, colonIndex);
-                    const quoteText = quotedContent.substring(colonIndex + 4);
-                    formattedLines.push(`<div class="quoted-message"><span class="quote-author">${escapeHtml(author)}:</span> ${hasHtmlTags ? allowHtml(quoteText) : formatInline(quoteText)}</div>`);
-                } else {
-                    formattedLines.push(`<div class="quoted-message">${hasHtmlTags ? allowHtml(quotedContent) : formatInline(quotedContent)}</div>`);
-                }
-            } else {
-                formattedLines.push(`<div class="quoted-message">${hasHtmlTags ? allowHtml(quotedContent) : formatInline(quotedContent)}</div>`);
-            }
-            continue;
-        }
+        // Quoted lines - УБРАНО: старая система цитат больше не используется
+        // Теперь ответы обрабатываются через отдельный блок replyTo, а не через цитаты в тексте
+        // if (line.startsWith('> ')) { ... }
 
         // Headers
         const headerMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/);
@@ -3875,7 +3856,8 @@ async function loadDMHistory(userId) {
                    reactions: message.reactions || [],
                    file: message.file,  // Добавляем информацию о файле, если она есть
                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
-                   edited: message.edited  // Добавляем флаг редактирования, если он существует
+                   edited: message.edited,  // Добавляем флаг редактирования, если он существует
+                   replyTo: message.replyTo || null  // Добавляем информацию об ответе
                });
            });
        } else {
@@ -4761,6 +4743,13 @@ function applyTheme(themeName) {
 function applyAccentColor(color) {
     const root = document.documentElement;
     root.style.setProperty('--accent', color);
+
+    // Convert hex to RGB for rgba() usage
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    root.style.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
 
     // Update accentB to be a lighter version of the accent color
     const accentB = lightenColor(color, 20);

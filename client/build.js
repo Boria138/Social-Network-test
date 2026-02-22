@@ -17,7 +17,8 @@ const files = [
     'auth.css',
     'script.js',
     'auth.js',
-    'config.js'
+    'config.js',
+    'reply-system.js'
 ];
 
 // Copy files

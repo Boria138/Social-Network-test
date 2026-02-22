@@ -457,12 +457,37 @@ app.get('/api/dm/:userId', authenticateToken, async (req, res) => {
                 };
             }
 
+            // Добавляем информацию об ответе, если он есть
+            let replyTo = null;
+            if (message.replyTo) {
+                replyTo = message.replyTo;
+                // Определяем, является ли ответ голосовым сообщением или файлом
+                const replyMessage = await dmDB.getById(message.replyTo.id);
+                if (replyMessage) {
+                    const replyFiles = await fileDB.getByDM(message.replyTo.id);
+                    if (replyFiles.length > 0) {
+                        const replyFileRecord = replyFiles[0];
+                        const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'webm', 'm4a', 'aac'];
+                        const fileExt = replyFileRecord.filename.split('.').pop().toLowerCase();
+                        replyTo.isVoiceMessage = audioExtensions.includes(fileExt);
+                        replyTo.file = {
+                            id: replyFileRecord.id,
+                            filename: replyFileRecord.filename,
+                            url: `/uploads/${replyFileRecord.filepath.split('/').pop()}`,
+                            type: replyFileRecord.filetype,
+                            size: replyFileRecord.filesize
+                        };
+                    }
+                }
+            }
+
             return {
                 ...message,
                 reactions: reactions,
                 file: file,  // Добавляем информацию о файле, если он есть
                 edited: message.edited,  // Используем поле edited из базы данных
-                originalContent: message.originalContent  // Добавляем оригинальное содержимое
+                originalContent: message.originalContent,  // Добавляем оригинальное содержимое
+                replyTo: replyTo  // Добавляем информацию об ответе
             };
         }));
 
@@ -657,11 +682,16 @@ io.on('connection', async (socket) => {
             if (message.file && message.text === '') {
                 messageText = '';
             }
+            
+            // Извлекаем ID ответа, если он есть
+            const replyToId = message.replyTo ? message.replyTo.id : null;
+            
             const savedMessage = await dmDB.create(
                 messageText,
                 socket.userId,
                 receiverId,
-                message.timestamp
+                message.timestamp,
+                replyToId
             );
 
             // Если сообщение содержит файл, обновляем запись файла, чтобы она указывала на ID сообщения
@@ -672,6 +702,18 @@ io.on('connection', async (socket) => {
             // Get reactions for the new message
             const reactions = await reactionDB.getByMessage(savedMessage.id);
 
+            // Формируем replyTo из данных, которые пришли от клиента
+            let replyToPayload = null;
+            if (message.replyTo) {
+                replyToPayload = {
+                    id: message.replyTo.id,
+                    author: message.replyTo.author,
+                    text: message.replyTo.text,
+                    isVoiceMessage: message.replyTo.isVoiceMessage || false,
+                    file: message.replyTo.file || null
+                };
+            }
+
             const messagePayload = {
                 id: savedMessage.id,
                 author: sender.username,
@@ -679,7 +721,8 @@ io.on('connection', async (socket) => {
                 text: message.text,
                 timestamp: message.timestamp,
                 reactions: reactions,
-                file: message.file  // Добавляем информацию о файле, если она есть
+                file: message.file,  // Добавляем информацию о файле, если она есть
+                replyTo: replyToPayload  // Добавляем информацию об ответе
             };
 
             const receiverSocket = Array.from(users.values())
@@ -730,7 +773,12 @@ io.on('connection', async (socket) => {
                 timestamp: updatedMessage.created_at,
                 reactions: reactions,
                 edited: true,  // Помечаем, что сообщение было отредактировано
-                originalContent: updatedMessage.originalContent  // Добавляем оригинальное содержимое
+                originalContent: updatedMessage.originalContent,  // Добавляем оригинальное содержимое
+                replyTo: updatedMessage.reply_to_id ? {
+                    id: updatedMessage.reply_to_id,
+                    author: updatedMessage.reply_to_author,
+                    text: updatedMessage.reply_to_content
+                } : null  // Добавляем информацию об ответе
             };
 
             // Отправляем обновленное сообщение получателю
