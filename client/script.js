@@ -2066,6 +2066,11 @@ function addMessageToUI(message) {
         twemoji.parse(messageGroup);
     }
 
+    // Highlight code blocks with Prism.js
+    if (typeof Prism !== 'undefined') {
+        Prism.highlightAllUnder(messageGroup);
+    }
+
     // Add link previews for URLs in the message
     const messageId = message.id || Date.now();
     addLinkPreviews(messageId, message.text, text);
@@ -2229,10 +2234,15 @@ function updateMessageInUI(updatedMessage) {
             }
             
             messageTextElement.innerHTML = newTextContent;
-            
+
             // Re-parse emojis if twemoji is available
             if (typeof twemoji !== 'undefined') {
                 twemoji.parse(messageTextElement);
+            }
+
+            // Re-highlight code blocks with Prism.js
+            if (typeof Prism !== 'undefined') {
+                Prism.highlightAllUnder(messageTextElement);
             }
         }
     }
