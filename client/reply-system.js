@@ -16,6 +16,13 @@
 // Глобальное состояние для текущего ответа
 let currentReplyTo = null;
 
+// Проверка: отключены ли ответы (для канала новостей)
+function isReplyDisabled() {
+    // Проверяем, находимся ли мы в канале новостей
+    const serverName = document.getElementById('serverName');
+    return serverName && serverName.textContent === 'Новости';
+}
+
 // Функция экранирования HTML для безопасности
 function escapeHtml(text) {
     if (!text) return '';
@@ -53,6 +60,9 @@ function initializeReplySystem() {
 // Функция для ответа на выделенный текст
 function setupReplyToSelection() {
     document.addEventListener('mouseup', function() {
+        // Отключаем в канале новостей
+        if (isReplyDisabled()) return;
+        
         const selection = window.getSelection();
         if (selection.toString().trim() !== '') {
             // Create a temporary button to allow replying to selection
@@ -121,6 +131,11 @@ initializeReplySystem = function() {
 
 // Обновленная функция ответа на сообщение
 function replyToMessage(message) {
+    if (isReplyDisabled()) {
+        console.log('Reply disabled in News channel');
+        return;
+    }
+    
     currentReplyTo = {
         id: message.id,
         author: message.author,
@@ -131,8 +146,7 @@ function replyToMessage(message) {
     };
 
     showReplyPreview();
-    
-    // Фокус на поле ввода
+
     const messageInput = document.getElementById('messageInput');
     if (messageInput) {
         messageInput.focus();

@@ -12,7 +12,7 @@ const cors = require('cors');
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
 
-const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, sessionDB } = require('./database');
+const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, channelDB, sessionDB } = require('./database');
 
 const app = express();
 
@@ -309,6 +309,12 @@ app.post('/api/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await userDB.create(username, email, hashedPassword);
 
+        // Подписываем нового пользователя на системный канал
+        const systemChannel = await channelDB.getSystemChannel();
+        if (systemChannel) {
+            await channelDB.subscribe(systemChannel.id, user.id, 1);
+        }
+
         const token = generateToken();
         await sessionDB.create(token, user.id);
 
@@ -537,6 +543,31 @@ app.get('/api/servers/:serverId/members', authenticateToken, async (req, res) =>
         res.json(members);
     } catch (error) {
         res.status(500).json({ error: 'Failed to get server members' });
+    }
+});
+
+// Channel routes
+app.get('/api/channels/system', authenticateToken, async (req, res) => {
+    try {
+        console.log('Fetching system channel...');
+        const systemChannel = await channelDB.getSystemChannel();
+        console.log('System channel result:', systemChannel);
+        if (!systemChannel) {
+            return res.status(404).json({ error: 'System channel not found' });
+        }
+
+        // Добавляем количество подписчиков
+        console.log('Fetching subscriber count for channel:', systemChannel.id);
+        const subscriberCount = await channelDB.getSubscriberCount(systemChannel.id);
+        console.log('Subscriber count:', subscriberCount);
+        res.json({
+            ...systemChannel,
+            subscriberCount: subscriberCount
+        });
+    } catch (error) {
+        console.error('Get system channel error:', error);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ error: 'Failed to get system channel' });
     }
 });
 
@@ -805,17 +836,17 @@ io.on('connection', async (socket) => {
     socket.on('delete-dm', async (data) => {
         try {
             const { messageId, receiverId } = data;
-            
+
             // Проверяем, что пользователь является автором сообщения
             const message = await dmDB.getById(messageId);
             if (!message || message.sender_id !== socket.userId) {
                 console.error('User trying to delete message they did not send');
                 return;
             }
-            
+
             // Удаляем сообщение из базы данных
             await dmDB.delete(messageId);
-            
+
             const sender = await userDB.findById(socket.userId);
 
             // Отправляем уведомление о удалении получателю

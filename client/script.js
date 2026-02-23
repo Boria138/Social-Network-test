@@ -69,6 +69,14 @@ function initializeApp() {
     initializeDraggableCallWindow();
     initializeSettingsModal();
     connectToSocketIO();
+    
+    // Загружаем системный канал и добавляем в список
+    loadSystemChannel().then(channel => {
+        if (channel) {
+            prependSystemChannelToDMList();
+        }
+    });
+    
     // requestNotificationPermission(); // Убрано из автозапуска
     showFriendsView();
 
@@ -159,10 +167,10 @@ function connectToSocketIO() {
                     text: data.message.text,
                     timestamp: data.message.timestamp,
                     reactions: data.message.reactions || [],
-                    file: data.message.file,  // Добавляем информацию о файле, если она есть
-                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
-                    edited: data.message.edited,  // Добавляем флаг редактирования, если есть
-                    replyTo: data.message.replyTo || null  // Добавляем информацию об ответе
+                    file: data.message.file,
+                    isVoiceMessage: isVoiceMessage,
+                    edited: data.message.edited,
+                    replyTo: data.message.replyTo || null
                 });
                 scrollToBottom();
             }
@@ -245,9 +253,19 @@ function connectToSocketIO() {
             }
         });
 
+        // Обработка новых сообщений в канале
+        socket.on('new-channel-message', (data) => {
+            const { channelId, message } = data;
+
+            // Отображаем сообщение если мы в этом канале
+            if (currentView === 'channel' && currentChannel && currentChannel.id === channelId) {
+                addChannelMessageToUI(message);
+                scrollToBottom();
+            }
+        });
+
         socket.on('new-friend-request', () => {
             loadPendingRequests();
-            showNotification('New Friend Request', 'You have a new friend request!');
         });
 
         socket.on('incoming-call', (data) => {
@@ -399,10 +417,404 @@ async function loadFriends() {
         const friends = await response.json();
         displayFriends(friends);
         populateDMList(friends);
-        updateServerListWithFriends(friends); // Добавляем друзей в server-list для мобильной версии
+        updateServerListWithFriends(friends);
     } catch (error) {
         console.error('Error loading friends:', error);
     }
+}
+
+// Загрузка системного канала
+let systemChannelId = null;
+let systemChannelMessages = [];
+
+async function loadSystemChannel() {
+    try {
+        const response = await fetch(`${getApiUrl()}/api/channels/system`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            const channel = await response.json();
+            systemChannelId = channel.id;
+            console.log('System channel loaded, ID:', systemChannelId);
+            return channel;
+        } else {
+            console.error('Failed to load system channel, status:', response.status);
+        }
+    } catch (error) {
+        console.error('Error loading system channel:', error);
+    }
+    return null;
+}
+
+// Загрузка новостей из файла news.json
+async function loadNewsFromFile() {
+    try {
+        const response = await fetch('news.json');
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.news || [];
+    } catch (error) {
+        console.error('Error loading news:', error);
+        return [];
+    }
+}
+
+// Преобразование новости в сообщение канала
+function newsToChannelMessage(news) {
+    const content = `📢 **${news.title}** (v${news.version})\n\n${news.changes.map(c => `• ${c}`).join('\n')}`;
+    return {
+        id: `news-${news.id}`,
+        content: content,
+        username: 'Система',
+        avatar: '📢',
+        created_at: news.date + 'T00:00:00.000Z',
+        file: null,
+        reactions: [],
+        replyTo: null,
+        isNews: true
+    };
+}
+
+// Открытие системного канала (аналогично startSelfChat)
+async function openSystemChannel() {
+    if (!systemChannelId) {
+        console.error('systemChannelId not set');
+        return;
+    }
+    
+    currentView = 'channel';
+    currentChannel = { id: systemChannelId, name: 'Новости', type: 'system' };
+    
+    const friendsView = document.getElementById('friendsView');
+    const chatView = document.getElementById('chatView');
+    const dmListView = document.getElementById('dmListView');
+    const serverName = document.getElementById('serverName');
+    const chatHeaderInfo = document.getElementById('chatHeaderInfo');
+    const messageInputContainer = document.querySelector('.message-input-container');
+    
+    if (friendsView) friendsView.style.display = 'none';
+    if (chatView) chatView.style.display = 'flex';
+    if (dmListView) dmListView.style.display = 'block';
+    if (serverName) serverName.textContent = 'Новости';
+    if (chatHeaderInfo) {
+        chatHeaderInfo.innerHTML = `
+            <div class="channel-icon" style="margin-right: 8px;">
+                <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                </svg>
+            </div>
+            <div style="display: flex; flex-direction: column;">
+                <span class="channel-name">Новости</span>
+                <span class="channel-subscribers" style="font-size: 12px; color: rgba(255,255,255,0.5);">Загрузка...</span>
+            </div>
+        `;
+    }
+    
+    // Скрываем поле ввода сообщений (новости только для чтения)
+    if (messageInputContainer) {
+        messageInputContainer.style.display = 'none';
+    }
+    
+    // Выделяем системный канал в списке
+    document.querySelectorAll('.channel').forEach(ch => ch.classList.remove('active'));
+    const systemChannelEl = document.querySelector(`[data-channel-id="${systemChannelId}"]`);
+    if (systemChannelEl) systemChannelEl.classList.add('active');
+    
+    // Загружаем новости и количество подписчиков
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.placeholder = 'Новости только для чтения';
+    }
+    
+    // Загружаем количество подписчиков
+    try {
+        const response = await fetch(`${getApiUrl()}/api/channels/system`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            const channel = await response.json();
+            const subscribersEl = document.querySelector('.channel-subscribers');
+            if (subscribersEl && channel.subscriberCount) {
+                subscribersEl.textContent = `${channel.subscriberCount}${getSubscriberCountSuffix(channel.subscriberCount)}`;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading subscriber count:', error);
+    }
+    
+    await loadSystemChannelMessages();
+    
+    setTimeout(() => {
+        scrollToBottom();
+    }, 100);
+}
+
+// Склонение слова "подписчик"
+function getSubscriberCountSuffix(count) {
+    const lastDigit = count % 10;
+    const lastTwoDigits = count % 100;
+    
+    if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+        return ' подписчиков';
+    }
+    if (lastDigit === 1) {
+        return ' подписчик';
+    }
+    if (lastDigit >= 2 && lastDigit <= 4) {
+        return ' подписчика';
+    }
+    return ' подписчиков';
+}
+
+// Загрузка сообщений системного канала (аналогично loadSelfChatHistory)
+async function loadSystemChannelMessages() {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) {
+        console.error('messagesContainer not found');
+        return;
+    }
+    
+    console.log('Loading system channel messages...');
+    messagesContainer.innerHTML = '';
+    
+    try {
+        // Загружаем новости из файла
+        const news = await loadNewsFromFile();
+        console.log('News loaded:', news.length);
+        
+        // Загружаем сообщения из API (если есть)
+        let apiMessages = [];
+        try {
+            const response = await fetch(`${getApiUrl()}/api/channels/${systemChannelId}/messages`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                apiMessages = await response.json();
+                console.log('API messages loaded:', apiMessages.length);
+            }
+        } catch (error) {
+            console.log('No API messages or API not available');
+        }
+        
+        // Объединяем и сортируем по дате
+        const allMessages = [...news.map(newsToChannelMessage), ...apiMessages].sort((a, b) => 
+            new Date(a.created_at) - new Date(b.created_at)
+        );
+        
+        console.log('Total messages to display:', allMessages.length);
+        
+        // Отображаем сообщения
+        allMessages.forEach(msg => {
+            if (msg.isNews) {
+                addNewsMessageToUI(msg);
+            } else {
+                addMessageToUI(msg);
+            }
+        });
+    } catch (error) {
+        console.error('Error loading system channel messages:', error);
+        messagesContainer.innerHTML = '<div class="error-messages">Ошибка загрузки новостей</div>';
+    }
+}
+
+// Добавление новости в UI (аналогично addMessageToUI)
+function addNewsMessageToUI(message) {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) return;
+    
+    const date = new Date(message.created_at).toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+    });
+    
+    // Форматируем текст с Markdown
+    let formattedText = message.content
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^• (.+)$/gm, '<li>$1</li>');
+    
+    if (formattedText.includes('<li>')) {
+        formattedText = formattedText.replace(/((<li>.+<\/li>\n?)+)/g, '<ul>$1</ul>');
+    }
+    
+    const div = document.createElement('div');
+    div.className = 'message news-message';
+    div.setAttribute('data-message-id', message.id);
+    div.innerHTML = `
+        <div class="message-avatar" style="background: linear-gradient(135deg, #ff8c00, #ffaa33); font-size: 20px;">📢</div>
+        <div class="message-content">
+            <div class="message-header">
+                <span class="message-author" style="color: #ffaa33; font-weight: 600;">${message.username}</span>
+                <span class="message-time">${date}</span>
+            </div>
+            <div class="message-text" style="line-height: 1.6;">
+                ${formattedText}
+            </div>
+        </div>
+    `;
+    
+    messagesContainer.appendChild(div);
+}
+
+// Загрузка каналов пользователя
+async function loadUserChannels() {
+    try {
+        const response = await fetch(`${getApiUrl()}/api/channels`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            return await response.json();
+        }
+    } catch (error) {
+        console.error('Error loading user channels:', error);
+    }
+    return [];
+}
+
+// Отображение системного канала в списке каналов
+function prependSystemChannelToDMList() {
+    const dmList = document.getElementById('dmList');
+    if (!dmList) {
+        console.error('dmList not found');
+        return;
+    }
+    
+    if (!systemChannelId) {
+        console.error('systemChannelId not set');
+        return;
+    }
+
+    console.log('Prepending system channel to DM list, ID:', systemChannelId);
+
+    const systemChannelEl = document.createElement('div');
+    systemChannelEl.className = 'channel system-channel';
+    systemChannelEl.setAttribute('data-channel-id', systemChannelId);
+    systemChannelEl.innerHTML = `
+        <div class="channel-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+        </div>
+        <span class="channel-name">Новости</span>
+    `;
+    systemChannelEl.addEventListener('click', () => {
+        console.log('System channel clicked');
+        openSystemChannel();
+    });
+
+    // Вставляем после self-chat (первый элемент)
+    const selfChat = dmList.querySelector('.self-chat-icon');
+    if (selfChat && selfChat.closest('.channel')) {
+        dmList.insertBefore(systemChannelEl, selfChat.closest('.channel').nextSibling);
+    } else {
+        dmList.insertBefore(systemChannelEl, dmList.firstChild);
+    }
+}
+
+// Загрузка сообщений канала
+async function loadChannelMessages(channelId) {
+    try {
+        const response = await fetch(`${getApiUrl()}/api/channels/${channelId}/messages`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            const messages = await response.json();
+            displayChannelMessages(messages);
+        }
+    } catch (error) {
+        console.error('Error loading channel messages:', error);
+    }
+}
+
+// Отображение сообщений канала
+function displayChannelMessages(messages) {
+    const messagesContainer = document.getElementById('messagesContainer');
+    const messageInput = document.getElementById('messageInput');
+    
+    if (!messagesContainer) return;
+    
+    messagesContainer.innerHTML = '';
+    
+    if (messages.length === 0) {
+        messagesContainer.innerHTML = '<div class="no-messages">No messages yet. Be the first to say hello!</div>';
+        return;
+    }
+    
+    messages.forEach(msg => {
+        const messageEl = createChannelMessageElement(msg);
+        messagesContainer.appendChild(messageEl);
+    });
+    
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Обновляем placeholder
+    if (messageInput) {
+        messageInput.placeholder = `Message #${currentChannel?.name || 'channel'}...`;
+    }
+}
+
+// Создание элемента сообщения канала
+function createChannelMessageElement(msg) {
+    const div = document.createElement('div');
+    div.className = 'message';
+    div.setAttribute('data-message-id', msg.id);
+    
+    const timestamp = new Date(msg.created_at).toLocaleString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    
+    let fileHTML = '';
+    if (msg.file) {
+        if (msg.file.type.startsWith('image/')) {
+            fileHTML = `<div class="message-file"><img src="${msg.file.url}" alt="${msg.file.filename}" class="message-image"></div>`;
+        } else if (msg.file.type.startsWith('audio/')) {
+            fileHTML = `<div class="message-file"><audio controls src="${msg.file.url}"></audio></div>`;
+        } else if (msg.file.type.startsWith('video/')) {
+            fileHTML = `<div class="message-file"><video controls src="${msg.file.url}"></video></div>`;
+        } else {
+            fileHTML = `<div class="message-file"><a href="${msg.file.url}" download="${msg.file.filename}">📎 ${msg.file.filename}</a></div>`;
+        }
+    }
+    
+    let replyHTML = '';
+    if (msg.replyTo) {
+        replyHTML = `
+            <div class="reply-preview" data-reply-to="${msg.replyTo.id}">
+                <div class="reply-author">${msg.replyTo.author}</div>
+                <div class="reply-text">${msg.replyTo.text || '[Attachment]'}</div>
+            </div>
+        `;
+    }
+    
+    div.innerHTML = `
+        <div class="message-avatar">${msg.avatar || msg.username.charAt(0).toUpperCase()}</div>
+        <div class="message-content">
+            <div class="message-header">
+                <span class="message-author">${msg.username}</span>
+                <span class="message-time">${timestamp}</span>
+            </div>
+            ${replyHTML}
+            <div class="message-text">${escapeHtml(msg.content)}</div>
+            ${fileHTML}
+            <div class="message-reactions"></div>
+        </div>
+    `;
+    
+    // Добавляем реакции если есть
+    if (msg.reactions && msg.reactions.length > 0) {
+        const reactionsContainer = div.querySelector('.message-reactions');
+        msg.reactions.forEach(reaction => {
+            reactionsContainer.innerHTML += `
+                <span class="reaction" data-emoji="${reaction.emoji}">${reaction.emoji} ${reaction.count}</span>
+            `;
+        });
+    }
+    
+    return div;
 }
 
 // Добавляем обработчик изменения размера окна для обновления отображения друзей
@@ -1072,16 +1484,21 @@ function rejectCall(caller) {
 window.startDM = async function(friendId, friendUsername) {
     currentView = 'dm';
     currentDMUserId = friendId;
-    // currentServerId = null; // Убрано, так как серверы больше не используются
+    currentChannel = null; // Сбрасываем системный канал
 
     const friendsView = document.getElementById('friendsView');
     const chatView = document.getElementById('chatView');
     const dmListView = document.getElementById('dmListView');
+    const messageInputContainer = document.querySelector('.message-input-container');
 
     if (friendsView) friendsView.style.display = 'none';
     if (chatView) chatView.style.display = 'flex';
-    // document.getElementById('channelsView').style.display = 'none'; // Убрано, так как элемент больше не существует
     if (dmListView) dmListView.style.display = 'block';
+
+    // Показываем поле ввода (возвращаем после скрытия в канале новостей)
+    if (messageInputContainer) {
+        messageInputContainer.style.display = 'block';
+    }
 
     const chatHeaderInfo = document.getElementById('chatHeaderInfo');
     if (chatHeaderInfo) {
@@ -1099,8 +1516,7 @@ window.startDM = async function(friendId, friendUsername) {
     }
 
     await loadDMHistory(friendId);
-    
-    // Restore voice message handlers after loading history
+
     setTimeout(() => {
         restoreVoiceMessageHandlers();
     }, 100);
@@ -1109,15 +1525,22 @@ window.startDM = async function(friendId, friendUsername) {
 // Функция для открытия чата с самим собой
 function startSelfChat() {
     currentView = 'dm';
-    currentDMUserId = currentUser.id; // Используем ID текущего пользователя
+    currentDMUserId = currentUser.id;
+    currentChannel = null; // Сбрасываем системный канал
 
     const friendsView = document.getElementById('friendsView');
     const chatView = document.getElementById('chatView');
     const dmListView = document.getElementById('dmListView');
+    const messageInputContainer = document.querySelector('.message-input-container');
 
     if (friendsView) friendsView.style.display = 'none';
     if (chatView) chatView.style.display = 'flex';
     if (dmListView) dmListView.style.display = 'block';
+
+    // Показываем поле ввода (возвращаем после скрытия в канале новостей)
+    if (messageInputContainer) {
+        messageInputContainer.style.display = 'block';
+    }
 
     const chatHeaderInfo = document.getElementById('chatHeaderInfo');
     if (chatHeaderInfo) {
@@ -1128,7 +1551,6 @@ function startSelfChat() {
             <span class="channel-name" data-i18n="chat.selfChat">Self Chat</span>
         `;
 
-        // Применяем локализацию к обновленному элементу
         window.i18n.applyI18n(chatHeaderInfo);
     }
 
@@ -1137,10 +1559,8 @@ function startSelfChat() {
         messageInput.placeholder = `Message yourself...`;
     }
 
-    // Загружаем историю сообщений для Self Chat
     loadSelfChatHistory();
-    
-    // Restore voice message handlers after loading history
+
     setTimeout(() => {
         restoreVoiceMessageHandlers();
     }, 100);
@@ -1211,18 +1631,19 @@ function showFriendsView() {
     const dmListView = document.getElementById('dmListView');
     const serverName = document.getElementById('serverName');
     const friendsBtn = document.getElementById('friendsBtn');
+    const messageInputContainer = document.querySelector('.message-input-container');
 
     if (friendsView) friendsView.style.display = 'flex';
     if (chatView) chatView.style.display = 'none';
     if (dmListView) dmListView.style.display = 'block';
     if (serverName) serverName.textContent = 'Friends';
     if (friendsBtn) friendsBtn.classList.add('active');
-
-    // Hide chat and show friends content
-    if (chatView) chatView.style.display = 'none';
-    if (friendsView) friendsView.style.display = 'flex';
     
-    // Clear voice message elements when switching to friends view
+    // Показываем поле ввода
+    if (messageInputContainer) {
+        messageInputContainer.style.display = 'block';
+    }
+
     if (window.voiceMessageElements) {
         window.voiceMessageElements = [];
     }
@@ -1510,16 +1931,16 @@ function sendMessage() {
     }
 
     // Получаем текущий ответ (если есть)
-    const currentReplyTo = typeof window._getCurrentReplyTo === 'function' 
-        ? window._getCurrentReplyTo() 
+    const currentReplyTo = typeof window._getCurrentReplyTo === 'function'
+        ? window._getCurrentReplyTo()
         : null;
 
     const message = {
-        id: Date.now(), // используем временную метку как ID
+        id: Date.now(),
         text: text,
         author: currentUser.username,
         avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
-        timestamp: new Date().toISOString(), // отправляем в UTC
+        timestamp: new Date().toISOString(),
         reactions: [],
         replyTo: currentReplyTo ? {
             id: currentReplyTo.id,
@@ -1535,6 +1956,9 @@ function sendMessage() {
         addMessageToUI(message);
         saveSelfMessageToHistory(message);
         scrollToBottom();
+    } else if (currentView === 'channel' && systemChannelId) {
+        // Отправляем сообщение в системный канал
+        sendChannelMessage(text, currentReplyTo, null);
     } else if (currentDMUserId) {
         // Для обычных DM отправляем через сокет
         if (socket && socket.connected) {
@@ -1546,11 +1970,9 @@ function sendMessage() {
     }
 
     messageInput.value = '';
-    // Сбрасываем высоту textarea после отправки
     messageInput.style.height = 'auto';
     adjustTextareaHeight(messageInput);
-    
-    // Очищаем ответ после отправки
+
     if (typeof window._clearCurrentReplyTo === 'function') {
         window._clearCurrentReplyTo();
     }
@@ -3914,8 +4336,7 @@ function populateDMList(friends) {
        startSelfChat();
    });
    dmList.appendChild(selfChatItem);
-   
-   // Применяем локализацию к новому элементу
+
    window.i18n.applyI18n(selfChatItem);
 
    if (friends.length === 0) {

@@ -320,6 +320,87 @@ body::after{
     font-weight: 500;
 }
 
+/* Системный канал - Новости */
+.system-channel {
+    background: linear-gradient(135deg, rgba(234, 138, 21, 0.15), rgba(255, 140, 0, 0.08));
+    border: 1px solid rgba(255, 140, 0, 0.3);
+    border-radius: 10px;
+    margin-bottom: 8px;
+}
+
+.system-channel:hover {
+    background: linear-gradient(135deg, rgba(234, 138, 21, 0.25), rgba(255, 140, 0, 0.15));
+    border-color: rgba(255, 140, 0, 0.5);
+}
+
+.system-channel.active {
+    background: linear-gradient(135deg, rgba(234, 138, 21, 0.3), rgba(255, 140, 0, 0.2));
+    border-color: rgba(255, 140, 0, 0.6);
+    box-shadow: 0 8px 16px rgba(255, 140, 0, 0.2);
+}
+
+.system-channel .channel-icon {
+    color: #ff8c00;
+    margin-right: 8px;
+}
+
+.system-channel .channel-name {
+    font-weight: 600;
+    color: #ffaa33;
+}
+
+/* Сообщения новостей */
+.news-message {
+    background: linear-gradient(135deg, rgba(255, 140, 0, 0.08), rgba(234, 138, 21, 0.05));
+    border-left: 3px solid #ff8c00;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+}
+
+.news-message:hover {
+    background: linear-gradient(135deg, rgba(255, 140, 0, 0.12), rgba(234, 138, 21, 0.08));
+}
+
+.news-message .message-avatar {
+    background: linear-gradient(135deg, #ff8c00, #ffaa33) !important;
+    font-size: 20px;
+}
+
+.news-message .message-author {
+    color: #ffaa33 !important;
+    font-weight: 600;
+}
+
+.news-message ul {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.news-message li {
+    margin: 4px 0;
+}
+
+/* Статусы загрузки сообщений */
+.loading-messages,
+.error-messages,
+.no-messages {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.error-messages {
+    color: #ff4444;
+}
+
+.loading-messages {
+    color: #888;
+}
+
 .category-header {
     display: flex;
     align-items: center;
@@ -448,7 +529,8 @@ body::after{
     position: relative;
 }
 
-.chat-view {
+.chat-view,
+#chatView {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -535,9 +617,43 @@ body::after{
 .messages {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 18px 16px;
     display: flex;
     flex-direction: column;
+    min-height: 0; /* Важно для flex-контейнера с прокруткой */
+}
+
+/* Исправление прокрутки для Firefox */
+.messages {
+    scrollbar-width: thin;
+}
+
+.messages::-webkit-scrollbar {
+    width: 8px;
+}
+
+.messages::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.1);
+}
+
+.messages::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+}
+
+.messages::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+/* Сообщение канала/новостей */
+.message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px 0;
+    margin: 4px 0;
+    flex-shrink: 0; /* Важно: сообщения не должны сжиматься */
 }
 
 .message-group {
@@ -576,6 +692,7 @@ body::after{
 
 .message-content {
     flex: 1;
+    min-width: 0; /* Важно для flex-контейнера с прокруткой */
 }
 
 .message-header {
@@ -1487,6 +1604,7 @@ body::after{
    ======================================================= */
 .message-input-container {
     padding: 14px 16px 16px;
+    flex-shrink: 0; /* Важно: не сжимать контейнер ввода */
 }
 
 .message-input-wrapper {
