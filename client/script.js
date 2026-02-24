@@ -36,6 +36,9 @@ let recordingStartTime = null;
 let linkPreviewEnabled = true;
 const hiddenPreviews = new Set();
 
+// Notification service
+let notificationService = null;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     token = localStorage.getItem('token');
@@ -68,15 +71,17 @@ function initializeApp() {
     initializeEmojiPicker();
     initializeDraggableCallWindow();
     initializeSettingsModal();
+    initializeNotifications(); // Инициализация системы уведомлений
     connectToSocketIO();
-    
-    // Загружаем системный канал и добавляем в список
-    loadSystemChannel().then(channel => {
-        if (channel) {
-            prependSystemChannelToDMList();
+
+    // Загружаем системный канал и обновляем DM список
+    loadSystemChannel().then(() => {
+        // Пересоздаем DM список с каналом новостей
+        if (window.lastLoadedFriends) {
+            populateDMList(window.lastLoadedFriends);
         }
     });
-    
+
     // requestNotificationPermission(); // Убрано из автозапуска
     showFriendsView();
 
@@ -117,6 +122,222 @@ function showNotification(title, body) {
         new Notification(title, { body });
     }
 }
+
+// ==========================================
+// Notification System
+// ==========================================
+
+function initializeNotifications() {
+    if (typeof NotificationService === 'undefined') {
+        console.warn('NotificationService not loaded, skipping initialization');
+        return;
+    }
+
+    notificationService = new NotificationService();
+    notificationService.init();
+
+    // Инициализация обработчиков панели уведомлений
+    initializeNotificationsPanel();
+
+    // Обновляем DM список с бейджами после загрузки уведомлений
+    setTimeout(() => {
+        if (window.lastLoadedFriends) {
+            populateDMList(window.lastLoadedFriends);
+        }
+    }, 500);
+}
+
+function initializeNotificationsPanel() {
+    const notificationsBtn = document.getElementById('notificationsBtn');
+    const notificationsPanel = document.getElementById('notificationsPanel');
+    const markAllReadBtn = document.getElementById('markAllReadBtn');
+    const notificationBadge = document.getElementById('notificationBadge');
+    
+    // Открытие/закрытие панели уведомлений
+    if (notificationsBtn) {
+        notificationsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (notificationsPanel) {
+                notificationsPanel.classList.toggle('active');
+                const isActive = notificationsPanel.classList.contains('active');
+                notificationsPanel.setAttribute('aria-hidden', !isActive);
+                
+                // Если открываем панель, помечаем уведомления как прочитанные
+                if (isActive) {
+                    notificationService?.markMissedCallsAsRead();
+                    renderNotificationsList();
+                }
+            }
+        });
+    }
+    
+    // Закрытие панели при клике вне её
+    document.addEventListener('click', (e) => {
+        if (notificationsPanel && !notificationsPanel.contains(e.target) && 
+            (!notificationsBtn || !notificationsBtn.contains(e.target))) {
+            notificationsPanel.classList.remove('active');
+            notificationsPanel.setAttribute('aria-hidden', 'true');
+        }
+    });
+    
+    // Отметить все как прочитанные
+    if (markAllReadBtn) {
+        markAllReadBtn.addEventListener('click', () => {
+            notificationService?.markMissedCallsAsRead();
+            updateNotificationBadge();
+            renderNotificationsList();
+        });
+    }
+    
+    // Загрузка сохраненных уведомлений из localStorage
+    notificationService?.loadFromLocalStorage();
+    updateNotificationBadge();
+    renderNotificationsList();
+}
+
+function updateNotificationBadge() {
+    const badge = document.getElementById('notificationBadge');
+    if (!badge) return;
+    
+    // Считаем все непрочитанные уведомления
+    const notifications = notificationService?.getNotifications() || [];
+    const unreadCount = notifications.filter(n => !n.read).length;
+    
+    if (unreadCount > 0) {
+        badge.style.display = 'flex';
+        badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function renderNotificationsList() {
+    const container = document.getElementById('notificationsList');
+    if (!container) return;
+    
+    const notifications = notificationService?.getNotifications() || [];
+    
+    if (notifications.length === 0) {
+        container.innerHTML = '<div class="notifications-panel-empty">Нет уведомлений</div>';
+        return;
+    }
+    
+    let html = '';
+    
+    notifications.forEach(notif => {
+        const timeAgo = getTimeAgo(new Date(notif.timestamp));
+        const isRead = notif.read ? '' : 'unread';
+        
+        if (notif.type === 'missed-call') {
+            const callType = notif.callType === 'video' ? 'Видео' : 'Голосовой';
+            html += `
+                <div class="notification-item ${isRead}">
+                    <div class="notification-item-icon missed-call">📞</div>
+                    <div class="notification-item-content">
+                        <div class="notification-item-header">
+                            <span class="notification-item-title">${notif.username}</span>
+                            <span class="notification-item-time">${timeAgo}</span>
+                        </div>
+                        <div class="notification-item-text">Пропущенный ${callType} звонок</div>
+                        <div class="notification-item-actions">
+                            <button class="call-back" onclick="callUser('${notif.userId}', '${notif.callType}')">Перезвонить</button>
+                            <button class="dismiss" onclick="dismissNotification('${notif.userId}')">Скрыть</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else if (notif.type === 'message') {
+            html += `
+                <div class="notification-item ${isRead}">
+                    <div class="notification-item-icon message">💬</div>
+                    <div class="notification-item-content">
+                        <div class="notification-item-header">
+                            <span class="notification-item-title">${notif.username}</span>
+                            <span class="notification-item-time">${timeAgo}</span>
+                        </div>
+                        <div class="notification-item-text">${notif.text}</div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    container.innerHTML = html;
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    if (seconds < 60) return 'Только что';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} мин. назад`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} ч. назад`;
+    return `${Math.floor(seconds / 86400)} дн. назад`;
+}
+
+function addMessageNotification(sender, messageText, isDM = true) {
+    if (!notificationService) return;
+    
+    // Проверяем, находимся ли мы в текущем чате
+    const isInChat = isDM && currentView === 'dm' && currentDMUserId === sender.id;
+    
+    // Если мы в чате и окно активно, не показываем уведомление
+    if (isInChat && document.hasFocus()) {
+        return;
+    }
+    
+    // Увеличиваем счетчик непрочитанных (это также сохраняет уведомление в localStorage)
+    notificationService.incrementUnread(sender.id, {
+        username: sender.username,
+        avatar: sender.avatar,
+        text: messageText
+    });
+    updateNotificationBadge();
+    renderNotificationsList();
+    
+    // Показываем браузерное уведомление и звук
+    notificationService.showMessageNotification(sender, messageText, isDM);
+}
+
+function addCallNotification(fromUser, callType = 'voice') {
+    if (!notificationService) return;
+    
+    // Показываем браузерное уведомление
+    notificationService.showBrowserNotification('Входящий звонок', {
+        body: `${fromUser.username} звонит вам`,
+        requireInteraction: true,
+        tag: 'incoming-call'
+    });
+    
+    // Звуковое уведомление
+    notificationService.playNotificationSound('call');
+}
+
+// Глобальные функции для кнопок в уведомлениях
+window.callUser = function(userId, callType) {
+    // Закрытие панели уведомлений
+    const panel = document.getElementById('notificationsPanel');
+    if (panel) panel.classList.remove('active');
+    
+    // Инициирование звонка (будет вызвано из существующей функции)
+    console.log('Calling user:', userId, callType);
+    // Здесь будет вызов существующей функции начала звонка
+};
+
+window.dismissNotification = function(userId) {
+    if (notificationService) {
+        // Удаляем уведомления для этого пользователя
+        notificationService.notifications = notificationService.notifications.filter(
+            n => n.userId !== userId
+        );
+        notificationService.missedCalls = notificationService.missedCalls.filter(
+            c => c.from.id !== userId
+        );
+        notificationService.saveToLocalStorage();
+        renderNotificationsList();
+        updateNotificationBadge();
+    }
+};
+
 
 function updateUserInfo() {
     const userAvatarContent = document.querySelector('.user-avatar .user-avatar-content');
@@ -173,6 +394,23 @@ function connectToSocketIO() {
                     replyTo: data.message.replyTo || null
                 });
                 scrollToBottom();
+            }
+            
+            // Добавляем уведомление, если сообщение не в текущем чате
+            if (!(currentView === 'dm' && currentDMUserId && data.senderId === currentDMUserId)) {
+                const sender = {
+                    id: data.senderId,
+                    username: data.message.author,
+                    avatar: data.message.avatar
+                };
+                const messageText = data.message.text || (data.message.file ? '📎 Вложение' : '');
+                addMessageNotification(sender, messageText, true);
+                
+                // Принудительно обновляем бейдж сразу после добавления уведомления
+                setTimeout(() => {
+                    updateNotificationBadge();
+                    renderNotificationsList();
+                }, 100);
             }
         });
 
@@ -271,6 +509,8 @@ function connectToSocketIO() {
         socket.on('incoming-call', (data) => {
             const { from, type } = data;
             if (from) {
+                // Добавляем уведомление о входящем звонке
+                addCallNotification(from, type);
                 showIncomingCall(from, type);
             }
         });
@@ -326,7 +566,20 @@ function connectToSocketIO() {
                 leaveVoiceChannel(true);
             }
         });
-        
+
+        // Обработка уведомления о пропущенном звонке (от сервера)
+        socket.on('missed-call-notification', (data) => {
+            const { from, type, timestamp } = data;
+            console.log('Missed call notification from server:', from);
+            
+            // Сохраняем как пропущенный звонок
+            if (notificationService) {
+                notificationService.addMissedCall(from, type, new Date(timestamp));
+                updateNotificationBadge();
+                renderNotificationsList();
+            }
+        });
+
         // Обновляем список пользователей
         socket.on('user-list-update', (usersList) => {
             // Update online friends list
@@ -415,6 +668,7 @@ async function loadFriends() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const friends = await response.json();
+        window.lastLoadedFriends = friends; // Сохраняем для использования в startDM
         displayFriends(friends);
         populateDMList(friends);
         updateServerListWithFriends(friends);
@@ -621,22 +875,22 @@ async function loadSystemChannelMessages() {
 function addNewsMessageToUI(message) {
     const messagesContainer = document.getElementById('messagesContainer');
     if (!messagesContainer) return;
-    
+
     const date = new Date(message.created_at).toLocaleDateString('ru-RU', {
         day: 'numeric',
         month: 'long',
         year: 'numeric'
     });
-    
+
     // Форматируем текст с Markdown
     let formattedText = message.content
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/^• (.+)$/gm, '<li>$1</li>');
-    
+
     if (formattedText.includes('<li>')) {
         formattedText = formattedText.replace(/((<li>.+<\/li>\n?)+)/g, '<ul>$1</ul>');
     }
-    
+
     const div = document.createElement('div');
     div.className = 'message news-message';
     div.setAttribute('data-message-id', message.id);
@@ -652,8 +906,13 @@ function addNewsMessageToUI(message) {
             </div>
         </div>
     `;
-    
+
     messagesContainer.appendChild(div);
+    
+    // Применяем Twemoji к сообщению
+    if (typeof twemoji !== 'undefined') {
+        twemoji.parse(div);
+    }
 }
 
 // Загрузка каналов пользователя
@@ -1276,10 +1535,16 @@ function showIncomingCall(caller, type) {
         rejectCall(caller);
     };
 
-    // Auto-reject after 30 seconds
+    // Auto-reject after 30 seconds - add missed call notification
     setTimeout(() => {
         if (!incomingCallDiv.classList.contains('hidden')) {
             incomingCallDiv.classList.add('hidden');
+            // Добавляем уведомление о пропущенном звонке
+            if (notificationService) {
+                notificationService.addMissedCall(caller, type, new Date());
+                updateNotificationBadge();
+                renderNotificationsList();
+            }
             rejectCall(caller);
         }
     }, 30000);
@@ -1486,6 +1751,23 @@ window.startDM = async function(friendId, friendUsername) {
     currentDMUserId = friendId;
     currentChannel = null; // Сбрасываем системный канал
 
+    // Сбрасываем счетчик непрочитанных для этого пользователя
+    if (notificationService) {
+        notificationService.resetUnread(friendId);
+        // Также помечаем уведомления от этого пользователя как прочитанные
+        notificationService.notifications.forEach(n => {
+            if (n.userId === friendId) n.read = true;
+        });
+        notificationService.missedCalls.forEach(c => {
+            if (c.from.id === friendId) c.read = true;
+        });
+        notificationService.saveToLocalStorage();
+        // Отмечаем на сервере
+        notificationService.markUserReadOnServer(friendId);
+        updateNotificationBadge();
+        renderNotificationsList();
+    }
+
     const friendsView = document.getElementById('friendsView');
     const chatView = document.getElementById('chatView');
     const dmListView = document.getElementById('dmListView');
@@ -1516,6 +1798,11 @@ window.startDM = async function(friendId, friendUsername) {
     }
 
     await loadDMHistory(friendId);
+
+    // Обновляем DM список для удаления бейджа
+    loadFriends().then(() => {
+        populateDMList(window.lastLoadedFriends || []);
+    });
 
     setTimeout(() => {
         restoreVoiceMessageHandlers();
@@ -3359,17 +3646,52 @@ const EMOJI_CATEGORIES = {
     'smileys': {
         icon: '😀',
         name: 'Smileys & Emotion',
-        emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '☺️', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐', '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾']
+        emojis: [
+            '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇',
+            '🥰', '😍', '🤩', '😘', '😗', '☺️', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪',
+            '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒',
+            '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮',
+            '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐', '😕',
+            '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥',
+            '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠',
+            '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖',
+            '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾'
+        ]
     },
     'people': {
         icon: '👋',
         name: 'People & Body',
-        emojis: ['👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦿', '🦵', '🦶', '👂', '🦻', '👃', '🧠', '🫀', '🫁', '🦷', '🦴', '👀', '👁️', '👅', '👄', '👶', '🧒', '👦', '👧', '🧑', '👱', '👨', '🧔', '👩', '🧓', '👴', '👵', '🙍', '🙎', '🙅', '🙆', '💁', '🙋', '🧏', '🙇', '🤦', '🤷', '👮', '🕵️', '💂', '🥷', '👷', '🤴', '👸', '👳', '👲', '🧕', '🤵', '👰', '🤰', '🤱', '👼', '🎅', '🤶', '🦸', '🦹', '🧙', '🧚', '🧛', '🧜', '🧝', '🧞', '🧟', '💆', '💇', '🚶', '🧍', '🧎', '🏃', '💃', '🕺', '🕴️', '👯', '🧖', '🧗', '🤸', '🏌️', '🏇', '⛷️', '🏂', '🏋️', '🤼', '🤽', '🤾', '🤺', '⛹️', '🏊', '🚣', '🧘', '🛀', '🛌', '👭', '👫', '👬', '💏', '💑', '👪', '👨‍👩‍👦', '👨‍👩‍👧', '👨‍👩‍👧‍👦', '👨‍👩‍👦‍👦', '👨‍👩‍👧‍👧', '👨‍👦', '👨‍👦‍👦', '👨‍👧', '👨‍👧‍👦', '👨‍👧‍👧', '👩‍👦', '👩‍👦‍👦', '👩‍👧', '👩‍👧‍👦', '👩‍👧‍👧', '🗣️', '👤', '👥', '🫂', '👣']
+        emojis: [
+            '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙',
+            '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏',
+            '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦿', '🦵', '🦶',
+            '👂', '🦻', '👃', '🧠', '🫀', '🫁', '🦷', '🦴', '👀', '👁️', '👅', '👄',
+            '👶', '🧒', '👦', '👧', '🧑', '👱', '👨', '🧔', '👩', '🧓', '👴', '👵',
+            '🙍', '🙎', '🙅', '🙆', '💁', '🙋', '🧏', '🙇', '🤦', '🤷',
+            '👮', '🕵️', '💂', '🥷', '👷', '🤴', '👸', '👳', '👲', '🧕', '🤵', '👰',
+            '🤰', '🤱', '👼', '🎅', '🤶', '🦸', '🦹', '🧙', '🧚', '🧛', '🧜', '🧝',
+            '🧞', '🧟', '💆', '💇', '🚶', '🧍', '🧎', '🏃', '💃', '🕺', '🕴️',
+            '🧖', '🧗', '🤸', '🏌️', '🏇', '⛷️', '🏂', '🏋️', '🤼', '🤽', '🤾', '🤺',
+            '⛹️', '🏊', '🚣', '🧘', '🛀', '🛌', '👣'
+        ]
     },
     'animals': {
         icon: '🐶',
         name: 'Animals & Nature',
-        emojis: ['🐶', '🐕', '🦮', '🐕‍🦺', '🐩', '🐺', '🦊', '🦝', '🐱', '🐈', '🐈‍⬛', '🦁', '🐯', '🐅', '🐆', '🐴', '🐎', '🦄', '🦓', '🦌', '🦬', '🐮', '🐂', '🐃', '🐄', '🐷', '🐖', '🐗', '🐽', '🐏', '🐑', '🐐', '🐪', '🐫', '🦙', '🦒', '🐘', '🦣', '🦏', '🦛', '🐭', '🐁', '🐀', '🐹', '🐰', '🐇', '🐿️', '🦫', '🦔', '🦇', '🐻', '🐻‍❄️', '🐨', '🐼', '🦥', '🦦', '🦨', '🦘', '🦡', '🐾', '🦃', '🐔', '🐓', '🐣', '🐤', '🐥', '🐦', '🐧', '🕊️', '🦅', '🦆', '🦢', '🦉', '🦤', '🪶', '🦩', '🦚', '🦜', '🐸', '🐊', '🐢', '🦎', '🐍', '🐲', '🐉', '🦕', '🦖', '🐳', '🐋', '🐬', '🦭', '🐟', '🐠', '🐡', '🦈', '🐙', '🐚', '🐌', '🦋', '🐛', '🐜', '🐝', '🪲', '🐞', '🦗', '🪳', '🕷️', '🕸️', '🦂', '🦟', '🪰', '🪱', '🦠', '💐', '🌸', '💮', '🏵️', '🌹', '🥀', '🌺', '🌻', '🌼', '🌷', '🌱', '🪴', '🌲', '🌳', '🌴', '🌵', '🌾', '🌿', '☘️', '🍀', '🍁', '🍂', '🍃']
+        emojis: [
+            '🐶', '🐕', '🦮', '🐕‍🦺', '🐩', '🐺', '🦊', '🦝', '🐱', '🐈', '🐈‍⬛', '🦁',
+            '🐯', '🐅', '🐆', '🐴', '🐎', '🦄', '🦓', '🦌', '🦬', '🐮', '🐂', '🐃', '🐄',
+            '🐷', '🐖', '🐗', '🐽', '🐏', '🐑', '🐐', '🐪', '🐫', '🦙', '🦒', '🐘', '🦣',
+            '🦏', '🦛', '🐭', '🐁', '🐀', '🐹', '🐰', '🐇', '🐿️', '🦫', '🦔', '🦇', '🐻',
+            '🐻‍❄️', '🐨', '🐼', '🦥', '🦦', '🦨', '🦘', '🦡', '🐾',
+            '🦃', '🐔', '🐓', '🐣', '🐤', '🐥', '🐦', '🐧', '🕊️', '🦅', '🦆', '🦢',
+            '🦉', '🦤', '🪶', '🦩', '🦚', '🦜', '🐸', '🐊', '🐢', '🦎', '🐍', '🐲',
+            '🐉', '🦕', '🦖', '🐳', '🐋', '🐬', '🦭', '🐟', '🐠', '🐡', '🦈', '🐙',
+            '🐚', '🐌', '🦋', '🐛', '🐜', '🐝', '🪲', '🐞', '🦗', '🪳', '🕷️', '🕸️',
+            '🦂', '🦟', '🪰', '🪱', '🦠',
+            '💐', '🌸', '💮', '🏵️', '🌹', '🥀', '🌺', '🌻', '🌼', '🌷', '🌱', '🪴',
+            '🌲', '🌳', '🌴', '🌵', '🌾', '🌿', '☘️', '🍀', '🍁', '🍂', '🍃'
+        ]
     },
     'food': {
         icon: '🍔',
@@ -3394,12 +3716,64 @@ const EMOJI_CATEGORIES = {
     'symbols': {
         icon: '❤️',
         name: 'Symbols',
-        emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '☮️', '✝️', '☪️', '🕉️', '☸️', '✡️', '🔯', '🕎', '☯️', '☦️', '🛐', '⛎', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓', '🆔', '⚛️', '🉑', '☢️', '☣️', '📴', '📳', '🈶', '🈚', '🈸', '🈺', '🈷️', '✴️', '🆚', '💮', '🉐', '㊙️', '㊗️', '🈴', '🈵', '🈹', '🈲', '🅰️', '🅱️', '🆎', '🆑', '🅾️', '🆘', '❌', '⭕', '🛑', '⛔', '📛', '🚫', '💯', '💢', '♨️', '🚷', '🚯', '🚳', '🚱', '🔞', '📵', '🚭', '❗', '❕', '❓', '❔', '‼️', '⁉️', '🔅', '🔆', '〽️', '⚠️', '🚸', '🔱', '⚜️', '🔰', '♻️', '✅', '🈯', '💹', '❇️', '✳️', '❎', '🌐', '💠', 'Ⓜ️', '🌀', '💤', '🏧', '🚾', '♿', '🅿️', '🛗', '🈳', '🈂️', '🛂', '🛃', '🛄', '🛅', '🚹', '🚺', '🚼', '⚧️', '🚻', '🚮', '🎦', '📶', '🈁', '🔣', 'ℹ️', '🔤', '🔡', '🔠', '🆖', '🆗', '🆙', '🆒', '🆕', '🆓', '0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟', '🔢', '#️⃣', '*️⃣', '⏏️', '▶️', '⏸️', '⏯️', '⏹️', '⏺️', '⏭️', '⏮️', '⏩', '⏪', '⏫', '⏬', '◀️', '🔼', '🔽', '➡️', '⬅️', '⬆️', '⬇️', '↗️', '↘️', '↙️', '↖️', '↕️', '↔️', '↪️', '↩️', '⤴️', '⤵️', '🔀', '🔁', '🔂', '🔄', '🔃', '🎵', '🎶', '➕', '➖', '➗', '✖️', '♾️', '💲', '💱', '™️', '©️', '®️', '〰️', '➰', '➿', '🔚', '🔙', '🔛', '🔝', '🔜', '✔️', '☑️', '🔘', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫', '⚪', '🟤', '🔺', '🔻', '🔸', '🔹', '🔶', '🔷', '🔳', '🔲', '▪️', '▫️', '◾', '◽', '◼️', '◻️', '🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '⬛', '⬜', '🟫', '🔈', '🔇', '🔉', '🔊', '🔔', '🔕', '📣', '📢', '👁‍🗨', '💬', '💭', '🗯️', '♠️', '♣️', '♥️', '♦️', '🃏', '🎴', '🀄', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚', '🕛', '🕜', '🕝', '🕞', '🕟', '🕠', '🕡', '🕢', '🕣', '🕤', '🕥', '🕦', '🕧']
+        emojis: [
+            '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞',
+            '💓', '💗', '💖', '💘', '💝', '💟',
+            '☮️', '✝️', '☪️', '🕉️', '☸️', '✡️', '🔯', '🕎', '☯️', '☦️', '🛐', '⛎',
+            '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓',
+            '🆔', '⚛️', '🉑', '☢️', '☣️', '📴', '📳', '🈶', '🈚', '🈸', '🈺', '🈷️',
+            '✴️', '🆚', '💮', '🉐', '㊙️', '㊗️', '🈴', '🈵', '🈹', '🈲',
+            '🅰️', '🅱️', '🆎', '🆑', '🅾️', '🆘', '❌', '⭕', '🛑', '⛔', '📛', '🚫',
+            '💯', '💢', '♨️', '🚷', '🚯', '🚳', '🚱', '🔞', '📵', '🚭', '❗', '❕',
+            '❓', '❔', '‼️', '⁉️', '🔅', '🔆', '〽️', '⚠️', '🚸', '🔱', '⚜️', '🔰',
+            '♻️', '✅', '🈯', '💹', '❇️', '✳️', '❎', '🌐', '💠', 'Ⓜ️', '🌀', '💤',
+            '🏧', '🚾', '♿', '🅿️', '🛗', '🈳', '🈂️', '🛂', '🛃', '🛄', '🛅',
+            '🚹', '🚺', '🚼', '🚻', '🚮', '🎦', '📶', '🈁', '🔣', 'ℹ️', '🔤', '🔡',
+            '🔠', '🆖', '🆗', '🆙', '🆒', '🆕', '🆓',
+            '0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟',
+            '🔢', '#️⃣', '*️⃣', '⏏️', '▶️', '⏸️', '⏯️', '⏹️', '⏺️', '⏭️', '⏮️',
+            '⏩', '⏪', '⏫', '⏬', '◀️', '🔼', '🔽', '➡️', '⬅️', '⬆️', '⬇️',
+            '↗️', '↘️', '↙️', '↖️', '↕️', '↔️', '↪️', '↩️', '⤴️', '⤵️',
+            '🔀', '🔁', '🔂', '🔄', '🔃', '🎵', '🎶', '➕', '➖', '➗', '✖️', '♾️',
+            '💲', '💱', '™️', '©️', '®️', '〰️', '➰', '➿', '🔚', '🔙', '🔛', '🔝',
+            '🔜', '✔️', '☑️', '🔘',
+            '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '⚫', '⚪', '🟤',
+            '🔺', '🔻', '🔸', '🔹', '🔶', '🔷', '🔳', '🔲', '▪️', '▫️', '◾', '◽',
+            '◼️', '◻️', '🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '⬛', '⬜', '🟫',
+            '🔈', '🔇', '🔉', '🔊', '🔔', '🔕', '📣', '📢', '💬', '💭', '🗯️',
+            '♠️', '♣️', '♥️', '♦️', '🃏', '🎴', '🀄',
+            '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚', '🕛',
+            '🕜', '🕝', '🕞', '🕟', '🕠', '🕡', '🕢', '🕣', '🕤', '🕥', '🕦', '🕧'
+        ]
     },
     'flags': {
         icon: '🏳️',
         name: 'Flags',
-        emojis: ['🏳️', '🏴', '🏴‍☠️', '🏁', '🚩', '🎌', '🏳️‍🌈', '🏳️‍⚧️', '🇺🇳', '🇦🇫', '🇦🇱', '🇩🇿', '🇦🇸', '🇦🇩', '🇦🇴', '🇦🇮', '🇦🇶', '🇦🇬', '🇦🇷', '🇦🇲', '🇦🇼', '🇦🇺', '🇦🇹', '🇦🇿', '🇧🇸', '🇧🇭', '🇧🇩', '🇧🇧', '🇧🇾', '🇧🇪', '🇧🇿', '🇧🇯', '🇧🇲', '🇧🇹', '🇧🇴', '🇧🇦', '🇧🇼', '🇧🇷', '🇮🇴', '🇻🇬', '🇧🇳', '🇧🇬', '🇧🇫', '🇧🇮', '🇰🇭', '🇨🇲', '🇨🇦', '🇮🇨', '🇨🇻', '🇧🇶', '🇰🇾', '🇨🇫', '🇹🇩', '🇨🇱', '🇨🇳', '🇨🇽', '🇨🇨', '🇨🇴', '🇰🇲', '🇨🇬', '🇨🇩', '🇨🇰', '🇨🇷', '🇨🇮', '🇭🇷', '🇨🇺', '🇨🇼', '🇨🇾', '🇨🇿', '🇩🇰', '🇩🇯', '🇩🇲', '🇩🇴', '🇪🇨', '🇪🇬', '🇸🇻', '🇬🇶', '🇪🇷', '🇪🇪', '🇸🇿', '🇪🇹', '🇪🇺', '🇫🇰', '🇫🇴', '🇫🇯', '🇫🇮', '🇫🇷', '🇬🇫', '🇵🇫', '🇹🇫', '🇬🇦', '🇬🇲', '🇬🇪', '🇩🇪', '🇬🇭', '🇬🇮', '🇬🇷', '🇬🇱', '🇬🇩', '🇬🇵', '🇬🇺', '🇬🇹', '🇬🇬', '🇬🇳', '🇬🇼', '🇬🇾', '🇭🇹', '🇭🇳', '🇭🇰', '🇭🇺', '🇮🇸', '🇮🇳', '🇮🇩', '🇮🇷', '🇮🇶', '🇮🇪', '🇮🇲', '🇮🇱', '🇮🇹', '🇯🇲', '🇯🇵', '🎌', '🇯🇪', '🇯🇴', '🇰🇿', '🇰🇪', '🇰🇮', '🇽🇰', '🇰🇼', '🇰🇬', '🇱🇦', '🇱🇻', '🇱🇧', '🇱🇸', '🇱🇷', '🇱🇾', '🇱🇮', '🇱🇹', '🇱🇺', '🇲🇴', '🇲🇬', '🇲🇼', '🇲🇾', '🇲🇻', '🇲🇱', '🇲🇹', '🇲🇭', '🇲🇶', '🇲🇷', '🇲🇺', '🇾🇹', '🇲🇽', '🇫🇲', '🇲🇩', '🇲🇨', '🇲🇳', '🇲🇪', '🇲🇸', '🇲🇦', '🇲🇿', '🇲🇲', '🇳🇦', '🇳🇷', '🇳🇵', '🇳🇱', '🇳🇨', '🇳🇿', '🇳🇮', '🇳🇪', '🇳🇬', '🇳🇺', '🇳🇫', '🇰🇵', '🇲🇰', '🇲🇵', '🇳🇴', '🇴🇲', '🇵🇰', '🇵🇼', '🇵🇸', '🇵🇦', '🇵🇬', '🇵🇾', '🇵🇪', '🇵🇭', '🇵🇳', '🇵🇱', '🇵🇹', '🇵🇷', '🇶🇦', '🇷🇪', '🇷🇴', '🇷🇺', '🇷🇼', '🇼🇸', '🇸🇲', '🇸🇹', '🇸🇦', '🇸🇳', '🇷🇸', '🇸🇨', '🇸🇱', '🇸🇬', '🇸🇽', '🇸🇰', '🇸🇮', '🇬🇸', '🇸🇧', '🇸🇴', '🇿🇦', '🇰🇷', '🇸🇸', '🇪🇸', '🇱🇰', '🇧🇱', '🇸🇭', '🇰🇳', '🇱🇨', '🇵🇲', '🇻🇨', '🇸🇩', '🇸🇷', '🇸🇪', '🇨🇭', '🇸🇾', '🇹🇼', '🇹🇯', '🇹🇿', '🇹🇭', '🇹🇱', '🇹🇬', '🇹🇰', '🇹🇴', '🇹🇹', '🇹🇳', '🇹🇷', '🇹🇲', '🇹🇨', '🇹🇻', '🇻🇮', '🇺🇬', '🇺🇦', '🇦🇪', '🇬🇧', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '🏴󠁧󠁢󠁳󠁣󠁴󠁿', '🏴󠁧󠁢󠁷󠁬󠁳󠁿', '🇺🇸', '🇺🇾', '🇺🇿', '🇻🇺', '🇻🇦', '🇻🇪', '🇻🇳', '🇼🇫', '🇪🇭', '🇾🇪', '🇿🇲', '🇿🇼']
+        emojis: [
+            '🏳️',
+            '🏴',
+            '🏴‍☠️',
+            '🏁',
+            '🚩',
+            '🎌',
+            '🇦🇨', '🇦🇩', '🇦🇪', '🇦🇫', '🇦🇬', '🇦🇮', '🇦🇱', '🇦🇲', '🇦🇴', '🇦🇶', '🇦🇷', '🇦🇸', '🇦🇹', '🇦🇺', '🇦🇼', '🇦🇽',
+            '🇦🇿', '🇧🇦', '🇧🇧', '🇧🇩', '🇧🇪', '🇧🇫', '🇧🇬', '🇧🇭', '🇧🇮', '🇧🇯', '🇧🇱', '🇧🇲', '🇧🇳', '🇧🇴', '🇧🇶', '🇧🇷',
+            '🇧🇸', '🇧🇹', '🇧🇻', '🇧🇼', '🇧🇾', '🇧🇿', '🇨🇦', '🇨🇨', '🇨🇩', '🇨🇫', '🇨🇬', '🇨🇭', '🇨🇮', '🇨🇰', '🇨🇱', '🇨🇲',
+            '🇨🇳', '🇨🇴', '🇨🇵', '🇨🇷', '🇨🇺', '🇨🇻', '🇨🇼', '🇨🇽', '🇨🇾', '🇨🇿', '🇩🇪', '🇩🇬', '🇩🇯', '🇩🇰', '🇩🇲', '🇩🇴',
+            '🇩🇿', '🇪🇦', '🇪🇨', '🇪🇪', '🇪🇬', '🇪🇭', '🇪🇷', '🇪🇸', '🇪🇹', '🇪🇺', '🇫🇮', '🇫🇯', '🇫🇰', '🇫🇲', '🇫🇴', '🇫🇷',
+            '🇬🇦', '🇬🇧', '🇬🇩', '🇬🇪', '🇬🇫', '🇬🇬', '🇬🇭', '🇬🇮', '🇬🇱', '🇬🇲', '🇬🇳', '🇬🇵', '🇬🇶', '🇬🇷', '🇬🇸', '🇬🇹',
+            '🇬🇺', '🇬🇼', '🇬🇾', '🇭🇰', '🇭🇲', '🇭🇳', '🇭🇷', '🇭🇹', '🇭🇺', '🇮🇨', '🇮🇩', '🇮🇪', '🇮🇱', '🇮🇲', '🇮🇳', '🇮🇴',
+            '🇮🇶', '🇮🇷', '🇮🇸', '🇮🇹', '🇯🇪', '🇯🇲', '🇯🇴', '🇯🇵', '🇰🇪', '🇰🇬', '🇰🇭', '🇰🇮', '🇰🇲', '🇰🇳', '🇰🇵', '🇰🇷',
+            '🇰🇼', '🇰🇾', '🇰🇿', '🇱🇦', '🇱🇧', '🇱🇨', '🇱🇮', '🇱🇰', '🇱🇷', '🇱🇸', '🇱🇹', '🇱🇺', '🇱🇻', '🇱🇾', '🇲🇦', '🇲🇨',
+            '🇲🇩', '🇲🇪', '🇲🇫', '🇲🇬', '🇲🇭', '🇲🇰', '🇲🇱', '🇲🇲', '🇲🇳', '🇲🇴', '🇲🇵', '🇲🇶', '🇲🇷', '🇲🇸', '🇲🇹', '🇲🇺',
+            '🇲🇻', '🇲🇼', '🇲🇽', '🇲🇾', '🇲🇿', '🇳🇦', '🇳🇨', '🇳🇪', '🇳🇫', '🇳🇬', '🇳🇮', '🇳🇱', '🇳🇴', '🇳🇵', '🇳🇷', '🇳🇺',
+            '🇳🇿', '🇴🇲', '🇵🇦', '🇵🇪', '🇵🇫', '🇵🇬', '🇵🇭', '🇵🇰', '🇵🇱', '🇵🇲', '🇵🇳', '🇵🇷', '🇵🇸', '🇵🇹', '🇵🇼', '🇵🇾',
+            '🇶🇦', '🇷🇪', '🇷🇴', '🇷🇸', '🇷🇺', '🇷🇼', '🇸🇦', '🇸🇧', '🇸🇨', '🇸🇩', '🇸🇪', '🇸🇬', '🇸🇭', '🇸🇮', '🇸🇯', '🇸🇰',
+            '🇸🇱', '🇸🇲', '🇸🇳', '🇸🇴', '🇸🇷', '🇸🇸', '🇸🇹', '🇸🇻', '🇸🇽', '🇸🇾', '🇸🇿', '🇹🇦', '🇹🇨', '🇹🇩', '🇹🇫', '🇹🇬',
+            '🇹🇭', '🇹🇯', '🇹🇰', '🇹🇱', '🇹🇲', '🇹🇳', '🇹🇴', '🇹🇷', '🇹🇹', '🇹🇻', '🇹🇼', '🇹🇿', '🇺🇦', '🇺🇬', '🇺🇲', '🇺🇳',
+            '🇺🇸', '🇺🇾', '🇺🇿', '🇻🇦', '🇻🇨', '🇻🇪', '🇻🇬', '🇻🇮', '🇻🇳', '🇻🇺', '🇼🇫', '🇼🇸', '🇽🇰', '🇾🇪', '🇾🇹', '🇿🇦',
+            '🇿🇲', '🇿🇼'
+        ]
     }
 };
 
@@ -4339,6 +4713,26 @@ function populateDMList(friends) {
 
    window.i18n.applyI18n(selfChatItem);
 
+   // Добавляем канал новостей после self-chat (если загружен)
+   if (systemChannelId) {
+       const systemChannelEl = document.createElement('div');
+       systemChannelEl.className = 'channel system-channel';
+       systemChannelEl.setAttribute('data-channel-id', systemChannelId);
+       systemChannelEl.innerHTML = `
+           <div class="channel-icon">
+               <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                   <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+               </svg>
+           </div>
+           <span class="channel-name">Новости</span>
+       `;
+       systemChannelEl.addEventListener('click', () => {
+           console.log('System channel clicked');
+           openSystemChannel();
+       });
+       dmList.appendChild(systemChannelEl);
+   }
+
    if (friends.length === 0) {
        const emptyDM = document.createElement('div');
        emptyDM.className = 'empty-dm-list';
@@ -4351,9 +4745,19 @@ function populateDMList(friends) {
        const dmItem = document.createElement('div');
        dmItem.className = 'channel';
        dmItem.setAttribute('data-dm-id', friend.id);
+
+       // Проверяем количество непрочитанных от этого пользователя
+       const unreadCount = notificationService?.unreadCounts?.get(friend.id) || 0;
+       const unreadIndicator = unreadCount > 0
+           ? `<span class="dm-unread-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>`
+           : '';
+
        dmItem.innerHTML = `
-           <div class="friend-avatar">
-               <div class="friend-avatar-content">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+           <div class="friend-avatar-wrapper" style="position: relative;">
+               <div class="friend-avatar">
+                   <div class="friend-avatar-content">${friend.avatar || friend.username.charAt(0).toUpperCase()}</div>
+               </div>
+               ${unreadIndicator}
            </div>
            <span>${friend.username}</span>
        `;

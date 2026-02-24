@@ -18,7 +18,8 @@ const files = [
     'script.js',
     'auth.js',
     'config.js',
-    'reply-system.js'
+    'reply-system.js',
+    'notification-service.js'
 ];
 
 // Copy files

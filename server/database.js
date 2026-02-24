@@ -151,6 +151,29 @@ function initializeDatabase() {
         )
     `);
 
+    // Notifications - уведомления (пропущенные звонки и непрочитанные сообщения)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            from_user_id INTEGER,
+            type TEXT NOT NULL CHECK(type IN ('message', 'missed-call')),
+            call_type TEXT,
+            content TEXT,
+            read BOOLEAN DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (from_user_id) REFERENCES users(id)
+        )
+    `);
+
+    // Индекс для быстрого поиска уведомлений пользователя
+    try {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read)');
+    } catch (e) {
+        // Индекс может уже существовать
+    }
+
     // Channel messages - сообщения в каналах
     db.exec(`
         CREATE TABLE IF NOT EXISTS channel_messages (
@@ -749,6 +772,123 @@ const channelDB = {
     }
 };
 
+// Notification operations
+const notificationDB = {
+    // Создать уведомление
+    create: (userId, fromUserId, type, content = null, callType = null) => {
+        const stmt = db.prepare(`
+            INSERT INTO notifications (user_id, from_user_id, type, content, call_type)
+            VALUES (?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(userId, fromUserId, type, content, callType);
+        return Promise.resolve({ 
+            id: result.lastInsertRowid, 
+            userId, 
+            fromUserId, 
+            type, 
+            content, 
+            callType,
+            read: false 
+        });
+    },
+
+    // Получить все непрочитанные уведомления пользователя
+    getUnread: (userId) => {
+        const stmt = db.prepare(`
+            SELECT n.*, u.username as from_username, u.avatar as from_avatar
+            FROM notifications n
+            LEFT JOIN users u ON n.from_user_id = u.id
+            WHERE n.user_id = ? AND n.read = 0
+            ORDER BY n.created_at DESC
+        `);
+        return Promise.resolve(stmt.all(userId).map(row => ({
+            id: row.id,
+            userId: row.user_id,
+            fromUserId: row.from_user_id,
+            fromUsername: row.from_username,
+            fromAvatar: row.from_avatar,
+            type: row.type,
+            callType: row.call_type,
+            content: row.content,
+            read: row.read,
+            createdAt: row.created_at
+        })));
+    },
+
+    // Получить все уведомления пользователя
+    getAll: (userId, limit = 50) => {
+        const stmt = db.prepare(`
+            SELECT n.*, u.username as from_username, u.avatar as from_avatar
+            FROM notifications n
+            LEFT JOIN users u ON n.from_user_id = u.id
+            WHERE n.user_id = ?
+            ORDER BY n.created_at DESC
+            LIMIT ?
+        `);
+        return Promise.resolve(stmt.all(userId, limit).map(row => ({
+            id: row.id,
+            userId: row.user_id,
+            fromUserId: row.from_user_id,
+            fromUsername: row.from_username,
+            fromAvatar: row.from_avatar,
+            type: row.type,
+            callType: row.call_type,
+            content: row.content,
+            read: row.read,
+            createdAt: row.created_at
+        })));
+    },
+
+    // Отметить уведомление как прочитанное
+    markAsRead: (notificationId, userId) => {
+        const stmt = db.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?');
+        stmt.run(notificationId, userId);
+        return Promise.resolve();
+    },
+
+    // Отметить все уведомления пользователя как прочитанные
+    markAllAsRead: (userId) => {
+        const stmt = db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0');
+        stmt.run(userId);
+        return Promise.resolve();
+    },
+
+    // Отметить все уведомления от конкретного пользователя как прочитанные
+    markFromUserAsRead: (userId, fromUserId) => {
+        const stmt = db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND from_user_id = ? AND read = 0');
+        stmt.run(userId, fromUserId);
+        return Promise.resolve();
+    },
+
+    // Удалить уведомление
+    delete: (notificationId, userId) => {
+        const stmt = db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?');
+        stmt.run(notificationId, userId);
+        return Promise.resolve();
+    },
+
+    // Удалить все уведомления пользователя
+    deleteAll: (userId) => {
+        const stmt = db.prepare('DELETE FROM notifications WHERE user_id = ?');
+        stmt.run(userId);
+        return Promise.resolve();
+    },
+
+    // Получить количество непрочитанных уведомлений
+    getUnreadCount: (userId) => {
+        const stmt = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0');
+        const result = stmt.get(userId);
+        return Promise.resolve(result ? result.count : 0);
+    },
+
+    // Получить количество непрочитанных от конкретного пользователя
+    getUnreadFromUserCount: (userId, fromUserId) => {
+        const stmt = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND from_user_id = ? AND read = 0');
+        const result = stmt.get(userId, fromUserId);
+        return Promise.resolve(result ? result.count : 0);
+    }
+};
+
 // Session operations
 const sessionDB = {
     create: (sessionId, userId, expiresAt = null) => {
@@ -795,5 +935,6 @@ module.exports = {
     friendDB,
     serverDB,
     channelDB,
-    sessionDB
+    sessionDB,
+    notificationDB
 };

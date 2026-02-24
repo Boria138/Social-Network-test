@@ -12,7 +12,7 @@ const cors = require('cors');
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
 
-const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, channelDB, sessionDB } = require('./database');
+const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, channelDB, sessionDB, notificationDB } = require('./database');
 
 const app = express();
 
@@ -643,6 +643,70 @@ app.delete('/api/friends/:friendId', authenticateToken, async (req, res) => {
     }
 });
 
+// Notification API routes
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+    try {
+        const notifications = await notificationDB.getAll(req.user.id, 50);
+        const unreadCount = await notificationDB.getUnreadCount(req.user.id);
+        res.json({ notifications, unreadCount });
+    } catch (error) {
+        console.error('Get notifications error:', error);
+        res.status(500).json({ error: 'Failed to get notifications' });
+    }
+});
+
+app.get('/api/notifications/unread', authenticateToken, async (req, res) => {
+    try {
+        const notifications = await notificationDB.getUnread(req.user.id);
+        const unreadCount = await notificationDB.getUnreadCount(req.user.id);
+        res.json({ notifications, unreadCount });
+    } catch (error) {
+        console.error('Get unread notifications error:', error);
+        res.status(500).json({ error: 'Failed to get unread notifications' });
+    }
+});
+
+app.post('/api/notifications/mark-all-read', authenticateToken, async (req, res) => {
+    try {
+        await notificationDB.markAllAsRead(req.user.id);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Mark all read error:', error);
+        res.status(500).json({ error: 'Failed to mark notifications as read' });
+    }
+});
+
+app.post('/api/notifications/mark-user-read', authenticateToken, async (req, res) => {
+    try {
+        const { fromUserId } = req.body;
+        await notificationDB.markFromUserAsRead(req.user.id, fromUserId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Mark user read error:', error);
+        res.status(500).json({ error: 'Failed to mark notifications as read' });
+    }
+});
+
+app.delete('/api/notifications/:notificationId', authenticateToken, async (req, res) => {
+    try {
+        await notificationDB.delete(req.params.notificationId, req.user.id);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete notification error:', error);
+        res.status(500).json({ error: 'Failed to delete notification' });
+    }
+});
+
+app.delete('/api/notifications', authenticateToken, async (req, res) => {
+    try {
+        await notificationDB.deleteAll(req.user.id);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete all notifications error:', error);
+        res.status(500).json({ error: 'Failed to delete all notifications' });
+    }
+});
+
 // Store connected users
 const users = new Map();
 const rooms = new Map();
@@ -713,10 +777,10 @@ io.on('connection', async (socket) => {
             if (message.file && message.text === '') {
                 messageText = '';
             }
-            
+
             // Извлекаем ID ответа, если он есть
             const replyToId = message.replyTo ? message.replyTo.id : null;
-            
+
             const savedMessage = await dmDB.create(
                 messageText,
                 socket.userId,
@@ -729,6 +793,11 @@ io.on('connection', async (socket) => {
             if (message.file) {
                 await fileDB.linkToFileMessage(message.file.id, savedMessage.id);
             }
+
+            // Создаем уведомление для получателя (если он не в сети)
+            const receiverSocket = Array.from(users.values()).find(u => u.id === receiverId);
+            const content = messageText || (message.file ? '📎 Вложение' : '');
+            await notificationDB.create(receiverId, socket.userId, 'message', content);
 
             // Get reactions for the new message
             const reactions = await reactionDB.getByMessage(savedMessage.id);
@@ -755,9 +824,6 @@ io.on('connection', async (socket) => {
                 file: message.file,  // Добавляем информацию о файле, если она есть
                 replyTo: replyToPayload  // Добавляем информацию об ответе
             };
-
-            const receiverSocket = Array.from(users.values())
-                .find(u => u.id === receiverId);
 
             if (receiverSocket) {
                 io.to(receiverSocket.socketId).emit('new-dm', {
@@ -969,12 +1035,12 @@ io.on('connection', async (socket) => {
                 // Если пользователь уже в звонке, отправляем сигнал о присоединении к существующему звонку
                 const existingCall = userCallStates.get(to).callId;
                 const callData = activeCalls.get(existingCall);
-                
+
                 if (callData) {
                     // Добавляем инициатора к существующему звонку
                     callData.participants.push(from.id);
                     callData.socketIds.push(socket.id);
-                    
+
                     // Уведомляем инициатора о необходимости присоединиться к существующему звонку
                     socket.emit('join-existing-call', {
                         callId: existingCall,
@@ -990,7 +1056,7 @@ io.on('connection', async (socket) => {
                     initiator: from.id,
                     socketIds: [socket.id, receiverSocket.socketId]
                 });
-                
+
                 // Обновляем состояние пользователя
                 userCallStates.set(to, {
                     inCall: true,
@@ -1000,7 +1066,7 @@ io.on('connection', async (socket) => {
                     inCall: true,
                     callId: callId
                 });
-                
+
                 io.to(receiverSocket.socketId).emit('incoming-call', {
                     from: {
                         id: from.id,
@@ -1012,7 +1078,19 @@ io.on('connection', async (socket) => {
                 });
             }
         } else {
-            socket.emit('call-rejected', { message: 'User is offline' });
+            // Пользователь офлайн - сохраняем пропущенный звонок в базу
+            notificationDB.create(to, from.id, 'missed-call', null, type);
+            
+            socket.emit('missed-call-notification', {
+                to: to,
+                from: {
+                    id: from.id,
+                    username: from.username,
+                    avatar: from.username?.charAt(0).toUpperCase()
+                },
+                type: type,
+                timestamp: new Date().toISOString()
+            });
         }
     });
 
