@@ -117,14 +117,14 @@ function generateNewsJson() {
             currentSection = null;
             return;
         }
-        
+
         if (currentVersion) {
             const sectionMatch = line.match(sectionRegex);
             if (sectionMatch) {
                 currentSection = sectionMatch[1];
                 return;
             }
-            
+
             const changeMatch = line.match(changeRegex);
             if (changeMatch && currentSection) {
                 let changeText = changeMatch[1].trim();
