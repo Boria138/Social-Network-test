@@ -882,14 +882,8 @@ function addNewsMessageToUI(message) {
         year: 'numeric'
     });
 
-    // Форматируем текст с Markdown
-    let formattedText = message.content
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/^• (.+)$/gm, '<li>$1</li>');
-
-    if (formattedText.includes('<li>')) {
-        formattedText = formattedText.replace(/((<li>.+<\/li>\n?)+)/g, '<ul>$1</ul>');
-    }
+    // Форматируем текст с Markdown используя готовую функцию
+    let formattedText = formatQuotedText(message.content);
 
     const div = document.createElement('div');
     div.className = 'message news-message';
@@ -2315,7 +2309,7 @@ function addMessageToUI(message) {
 
     // Add edited indicator if message was edited
     if (message.edited) {
-        processedText += ' <span class="edited-indicator">(' + (window.i18n ? window.i18n.t('message.edited') : 'edited') + ')</span>';
+        processedText += ' <span class="edited-indicator">' + (window.i18n ? window.i18n.t('message.edited') : '(edited)') + '</span>';
     }
 
     // Set the HTML content to display formatted quotes
@@ -2848,8 +2842,25 @@ function editMessage(message) {
         return;
     }
 
+    // Берем текст из DOM элемента, а не из объекта message
+    // Это важно для повторно редактируемых сообщений
+    const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
+    const textElement = messageElement?.querySelector('.message-text');
+    
+    // Клонируем элемент чтобы удалить индикатор редактирования
+    let currentText = message.text;
+    if (textElement) {
+        const clone = textElement.cloneNode(true);
+        // Удаляем индикатор редактирования из клона
+        const editedIndicator = clone.querySelector('.edited-indicator');
+        if (editedIndicator) {
+            editedIndicator.remove();
+        }
+        currentText = clone.textContent;
+    }
+
     // Put the current message text in the input field
-    messageInput.value = message.text;
+    messageInput.value = currentText;
 
     // Focus the input and move cursor to the end
     messageInput.focus();
@@ -2939,7 +2950,7 @@ function updateMessageInUI(updatedMessage) {
             
             // Add edited indicator if message was edited
             if (updatedMessage.edited) {
-                newTextContent += ' <span class="edited-indicator">(' + (window.i18n ? window.i18n.t('message.edited') : 'edited') + ')</span>';
+                newTextContent += ' <span class="edited-indicator">' + (window.i18n ? window.i18n.t('message.edited') : '(edited)') + '</span>';
             }
             
             messageTextElement.innerHTML = newTextContent;
@@ -2980,6 +2991,20 @@ function deleteMessageFromUI(messageId) {
 
 // Function to parse and format messages with Markdown support
 function formatQuotedText(text) {
+    // Сначала обрабатываем многозначные HTML блоки (div, p, etc.)
+    // Заменяем их на плейсхолдеры, чтобы сохранить структуру
+    let htmlBlocks = [];
+    let blockIndex = 0;
+    
+    // Извлекаем многозначные HTML блоки и сжимаем их в одну строку
+    text = text.replace(/<(div|p|section|article|header|footer|main|aside|nav)(?:\s+[^>]*)?>[\s\S]*?<\/\1>/gi, (match) => {
+        const index = blockIndex++;
+        // Сжимаем HTML блок в одну строку (заменяем переносы на пробелы)
+        const compressedBlock = match.replace(/\n\s*/g, ' ');
+        htmlBlocks[index] = compressedBlock;
+        return `%%HTMLBLOCK${index}%%`;
+    });
+    
     const lines = text.split('\n');
     let formattedLines = [];
     let inList = false;
@@ -3035,7 +3060,14 @@ function formatQuotedText(text) {
         closeDetailsCodeBlock();
         closeDetailsList();
         if (inDetails) {
-            const content = detailsContent.join('\n');
+            let content = detailsContent.join('\n');
+            // Восстанавливаем HTML блоки внутри details
+            for (let i = 0; i < htmlBlocks.length; i++) {
+                const placeholder = `%%HTMLBLOCK${i}%%`;
+                const block = htmlBlocks[i];
+                const processedBlock = allowHtml(block);
+                content = content.replace(placeholder, processedBlock);
+            }
             // Check if summary is already present
             const hasSummary = content.includes('<summary>');
             if (hasSummary) {
@@ -3215,6 +3247,9 @@ function formatQuotedText(text) {
     const formatInline = (line) => {
         let result = escapeHtml(line);
 
+        // Images ![alt](url)
+        result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">');
+
         // Code blocks (inline) `code`
         result = result.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
 
@@ -3312,6 +3347,12 @@ function formatQuotedText(text) {
 
         // If inside details, collect content
         if (inDetails) {
+            // Check for HTML block placeholder
+            if (trimmedLine.startsWith('%%HTMLBLOCK') && trimmedLine.endsWith('%%')) {
+                detailsContent.push(trimmedLine);
+                continue;
+            }
+            
             // Check for standalone <summary>line</summary>
             if (trimmedLine.match(/^<summary>.*<\/summary>$/i)) {
                 const summaryMatch = trimmedLine.match(/<summary>(.*?)<\/summary>/i);
@@ -3384,6 +3425,13 @@ function formatQuotedText(text) {
             continue;
         }
 
+        // Check for HTML block placeholder
+        if (trimmedLine.startsWith('%%HTMLBLOCK') && trimmedLine.endsWith('%%')) {
+            closeList();
+            formattedLines.push(trimmedLine);
+            continue;
+        }
+
         // Check if line contains HTML tags - more permissive to catch all tags including <br>
         const hasHtmlTags = /<[a-z][a-z0-9]*(?:\s+[^>]*)?\/?>/i.test(line) ||
                            /<\/[a-z][a-z0-9]*>/i.test(line) ||
@@ -3449,7 +3497,30 @@ function formatQuotedText(text) {
     closeCodeBlock();
     closeDetails();
 
-    return formattedLines.join('');
+    let result = formattedLines.join('');
+
+    // Восстанавливаем HTML блоки, удаляя обёртку md-paragraph если она есть
+    for (let i = 0; i < htmlBlocks.length; i++) {
+        const placeholder = `%%HTMLBLOCK${i}%%`;
+        const block = htmlBlocks[i];
+        // Для HTML блоков используем прямую вставку с минимальной санитизацией
+        // Убираем только опасные атрибуты
+        let sanitizedBlock = block
+            .replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '')
+            .replace(/\s*on\w+\s*=\s*[^\s>]+/gi, '');
+        // Сначала заменяем <br> на <hr> везде
+        sanitizedBlock = sanitizedBlock.replace(/<br\s*\/?>/gi, '<hr class="md-hr">');
+        // Затем восстанавливаем <br> внутри <p> тегов
+        sanitizedBlock = sanitizedBlock.replace(/<p([^>]*)>([\s\S]*?)<\/p>/gi, (match, attrs, content) => {
+            const restoredContent = content.replace(/<hr class="md-hr">/gi, '<br>');
+            return `<p${attrs}>${restoredContent}</p>`;
+        });
+        // Удаляем обёртку <div class="md-paragraph"> если она есть
+        result = result.replace(`<div class="md-paragraph">${placeholder}</div>`, sanitizedBlock);
+        result = result.replace(placeholder, sanitizedBlock);
+    }
+
+    return result;
 }
 
 // Helper function to escape HTML to prevent XSS
@@ -3467,13 +3538,16 @@ function extractUrls(text) {
     const urlRegex = /https?:\/\/[^\s<]+[^\s<.,;:!?]/gi;
     const matches = text.match(urlRegex);
     if (!matches) return [];
-    
-    // Remove duplicates and filter out URLs from markdown links
+
+    // Remove duplicates and filter out URLs from markdown links and images
     const uniqueUrls = [...new Set(matches)];
     return uniqueUrls.filter(url => {
-        // Filter out URLs that are already in markdown format [text](url)
-        const markdownPattern = new RegExp(`\\[[^\\]]+\\]\\(${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'i');
-        return !markdownPattern.test(text);
+        const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Filter out URLs that are already in markdown link format [text](url)
+        const markdownLinkPattern = new RegExp(`\\[[^\\]]+\\]\\(${escapedUrl}\\)`, 'i');
+        // Filter out URLs that are in markdown image format ![alt](url)
+        const markdownImagePattern = new RegExp(`!\\[[^\\]]*\\]\\(${escapedUrl}\\)`, 'i');
+        return !markdownLinkPattern.test(text) && !markdownImagePattern.test(text);
     });
 }
 
@@ -5918,6 +5992,10 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
   }
 
   function t(key, lang){
+    // Если язык не указан, используем текущий
+    if (!lang) {
+      lang = getLang();
+    }
     const dict = getDict(lang);
     if (key in dict) return dict[key];
 

@@ -967,6 +967,11 @@ body::after{
     padding: 0;
 }
 
+.message-text > div[align] {
+    display: block !important;
+    margin: 8px 0;
+}
+
 /* ======= Markdown Styles ======= */
 
 /* Headers */
@@ -1118,6 +1123,16 @@ body::after{
     margin: 4px 0;
 }
 
+/* Markdown image */
+.md-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 8px 0;
+    display: block;
+    cursor: pointer;
+}
+
 /* HTML Elements Support */
 .message-text img {
     max-width: 100%;
@@ -1156,8 +1171,49 @@ body::after{
 /* Centered div with align attribute */
 .message-text div[align="center"] {
     text-align: center !important;
-    display: block;
+    display: block !important;
     width: 100%;
+    margin: 8px 0;
+}
+
+.message-text div[align="center"] > img:first-child {
+    display: block !important;
+    margin: 0 auto 8px auto !important;
+}
+
+.message-text div[align="center"] > h1,
+.message-text div[align="center"] > h2,
+.message-text div[align="center"] > h3,
+.message-text div[align="center"] > h4,
+.message-text div[align="center"] > h5,
+.message-text div[align="center"] > h6 {
+    display: block !important;
+    margin: 8px auto !important;
+    text-align: center !important;
+}
+
+.message-text div[align="center"] > a {
+    display: inline-block !important;
+    margin: 0 4px !important;
+}
+
+.message-text div[align="center"] > a img {
+    display: inline-block !important;
+    margin: 0 !important;
+}
+
+.message-text div[align="center"] > p {
+    display: block !important;
+    margin: 16px auto 8px auto !important;
+    max-width: 600px;
+    text-align: center !important;
+}
+
+.message-text div[align="center"] > hr {
+    display: block !important;
+    border: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+    width: 100% !important;
 }
 
 .message-text div[align="left"] {

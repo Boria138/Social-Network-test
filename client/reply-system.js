@@ -16,13 +16,6 @@
 // Глобальное состояние для текущего ответа
 let currentReplyTo = null;
 
-// Проверка: отключены ли ответы (для канала новостей)
-function isReplyDisabled() {
-    // Проверяем, находимся ли мы в канале новостей
-    const serverName = document.getElementById('serverName');
-    return serverName && serverName.textContent === 'Новости';
-}
-
 // Функция экранирования HTML для безопасности
 function escapeHtml(text) {
     if (!text) return '';
@@ -59,21 +52,35 @@ function initializeReplySystem() {
 
 // Функция для ответа на выделенный текст
 function setupReplyToSelection() {
-    document.addEventListener('mouseup', function() {
-        // Отключаем в канале новостей
-        if (isReplyDisabled()) return;
-        
+    document.addEventListener('mouseup', function(event) {
         const selection = window.getSelection();
-        if (selection.toString().trim() !== '') {
-            // Create a temporary button to allow replying to selection
+        const selectedText = selection.toString().trim();
+
+        // Проверяем, что выделение не пустое
+        if (selectedText === '') {
+            return;
+        }
+
+        // Проверяем, что выделение находится внутри сообщения (.message-group)
+        const messageElement = selection.anchorNode.nodeType === Node.ELEMENT_NODE
+            ? selection.anchorNode.closest('.message-group')
+            : selection.anchorNode.parentElement?.closest('.message-group');
+
+        // Если выделение не внутри сообщения - ничего не делаем
+        if (!messageElement) {
+            return;
+        }
+
+        // Получаем координаты выделения
+        try {
             const range = selection.getRangeAt(0);
             const rect = range.getBoundingClientRect();
 
-            // Create reply button for selection
+            // Создаем кнопку ответа
             const replyButton = document.createElement('button');
             replyButton.className = 'reply-selection-btn';
             replyButton.textContent = '↪';
-            replyButton.title = 'Reply to selection';
+            replyButton.title = 'Ответить на выделенное';
             replyButton.style.position = 'fixed';
             replyButton.style.left = rect.left + 'px';
             replyButton.style.top = (rect.top - 30) + 'px';
@@ -87,38 +94,41 @@ function setupReplyToSelection() {
             replyButton.style.cursor = 'pointer';
 
             replyButton.onclick = function() {
-                const messageElement = selection.anchorNode.parentElement.closest('.message-group');
+                // Получаем данные сообщения
+                const messageId = messageElement.getAttribute('data-message-id');
+                const authorElement = messageElement.querySelector('.message-author');
                 
-                if (messageElement) {
-                    // Get message data from the element
-                    const messageId = messageElement.getAttribute('data-message-id');
-                    const authorElement = messageElement.querySelector('.message-author');
-                    const textElement = messageElement.querySelector('.message-text');
-                    
-                    // Create a message object for replyToMessage
-                    const messageToReplyTo = {
-                        id: messageId,
-                        author: authorElement ? authorElement.textContent : 'Unknown',
-                        text: textElement ? textElement.textContent : selection.toString(),
-                        isVoiceMessage: messageElement.querySelector('.voice-message-container') !== null,
-                        file: null
-                    };
-                    
-                    // Use the new reply system
-                    window._replyToMessageInternal(messageToReplyTo);
-                }
+                // Создаем объект сообщения для ответа
+                const messageToReplyTo = {
+                    id: messageId,
+                    author: authorElement ? authorElement.textContent : 'Unknown',
+                    text: selectedText, // Используем именно выделенный текст, а не весь
+                    isVoiceMessage: messageElement.querySelector('.voice-message-container') !== null,
+                    file: null
+                };
 
-                document.body.removeChild(replyButton);
+                // Используем систему ответов
+                window._replyToMessageInternal(messageToReplyTo);
+
+                // Очищаем выделение
+                selection.removeAllRanges();
+
+                // Удаляем кнопку
+                if (replyButton.parentNode) {
+                    document.body.removeChild(replyButton);
+                }
             };
 
             document.body.appendChild(replyButton);
 
-            // Remove button after a short time
+            // Удаляем кнопку через 3 секунды
             setTimeout(() => {
                 if (replyButton.parentNode) {
                     document.body.removeChild(replyButton);
                 }
             }, 3000);
+        } catch (e) {
+            console.error('Error creating reply button:', e);
         }
     });
 }
@@ -131,11 +141,6 @@ initializeReplySystem = function() {
 
 // Обновленная функция ответа на сообщение
 function replyToMessage(message) {
-    if (isReplyDisabled()) {
-        console.log('Reply disabled in News channel');
-        return;
-    }
-    
     currentReplyTo = {
         id: message.id,
         author: message.author,
