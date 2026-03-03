@@ -92,6 +92,8 @@ ufw allow 3000
 ```env
 PORT=3000
 NODE_ENV=production
+SSL_CERT=/root/cert/cert.crt
+SSL_KEY=/root/cert/secret.key
 ```
 
 ## API
