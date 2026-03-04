@@ -14,6 +14,7 @@
 - **Реакции** — эмодзи на сообщения
 - **Поиск пользователей** — возможность найти и добавить в друзья других пользователей
 - **Системный канал «Новости»** — официальный канал для объявлений (принудительная подписка)
+- **Транскрипция голосовых сообщений** — преобразование речи в текст через whisper-cpp
 
 ## Структура проекта
 
@@ -94,6 +95,8 @@ PORT=3000
 NODE_ENV=production
 SSL_CERT=/root/cert/cert.crt
 SSL_KEY=/root/cert/secret.key
+WHISPER_CPP_PATH=/usr/local/bin/whisper-cli
+WHISPER_CPP_MODEL=/usr/local/share/whisper.cpp/ggml-tiny-q8_0.bin
 ```
 
 ## API
@@ -108,6 +111,7 @@ SSL_KEY=/root/cert/secret.key
 | GET | /api/friends | Друзья |
 | POST | /api/friends/request | Запрос в друзья |
 | POST | /api/upload | Загрузка файла |
+| POST | /api/transcribe | Транскрипция голосового сообщения |
 
 ## Команды PM2
 
@@ -128,6 +132,12 @@ pm2 stop discord-api    # Остановить
 ### Камера/микрофон не работают
 - Для WebRTC нужен HTTPS (кроме localhost)
 - Настройте nginx с SSL сертификатом
+
+### Транскрипция не работает
+- Проверьте установку whisper-cpp: `whisper-cli --help`
+- Убедитесь что модель загружена: `ls /usr/local/share/whisper.cpp/`
+- Для VPS с 1GB RAM используйте модель `tiny-q8_0` (~40MB RAM)
+- Проверьте логи: `pm2 logs discord-api | grep Transcribe`
 
 ## Лицензия
 

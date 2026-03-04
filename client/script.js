@@ -2432,6 +2432,28 @@ function addMessageToUI(message) {
         speedBtn.style.color = 'var(--accent)';
         speedBtn.style.fontSize = '12px';
         speedBtn.style.fontWeight = '600';
+
+        // Transcribe button
+        const transcribeBtn = document.createElement('button');
+        transcribeBtn.className = 'voice-transcribe-small-btn';
+        transcribeBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M14.25 2.001c0-.892-.339-1.751-.948-2.405l-.859 1.135c.375.403.607.942.607 1.535 0 1.242-1.008 2.25-2.25 2.25s-2.25-1.008-2.25-2.25c0-.593.232-1.132.607-1.535L8.25 1.266c-.609.654-.948 1.513-.948 2.405 0 1.795 1.455 3.25 3.25 3.25s3.25-1.455 3.25-3.25v-1.669z"/>
+                <path fill="currentColor" d="M12 7.5c-3.038 0-5.5 2.462-5.5 5.5v2.25H5.25c-.69 0-1.25.56-1.25 1.25v3c0 .69.56 1.25 1.25 1.25h13.5c.69 0 1.25-.56 1.25-1.25v-3c0-.69-.56-1.25-1.25-1.25H17.5v-2.25c0-3.038-2.462-5.5-5.5-5.5zm-3.5 5.5c0-1.933 1.567-3.5 3.5-3.5s3.5 1.567 3.5 3.5v2.25H8.5v-2.25z"/>
+            </svg>
+        `;
+        transcribeBtn.title = window.i18n ? window.i18n.t('actions.transcribe') : 'Расшифровать';
+        transcribeBtn.style.background = 'transparent';
+        transcribeBtn.style.border = '1px solid var(--muted)';
+        transcribeBtn.style.borderRadius = '8px';
+        transcribeBtn.style.padding = '6px 10px';
+        transcribeBtn.style.cursor = 'pointer';
+        transcribeBtn.style.color = 'var(--muted)';
+        transcribeBtn.style.fontSize = '12px';
+        transcribeBtn.style.fontWeight = '600';
+        transcribeBtn.style.display = 'flex';
+        transcribeBtn.style.alignItems = 'center';
+        transcribeBtn.style.gap = '6px';
         
         // Duration display
         const durationDisplay = document.createElement('span');
@@ -2463,6 +2485,92 @@ function addMessageToUI(message) {
             currentSpeed = speeds[speedIndex];
             audio.playbackRate = currentSpeed;
             speedBtn.textContent = `${currentSpeed}x`;
+        });
+
+        // Transcribe button click handler
+        let isTranscribing = false;
+        transcribeBtn.addEventListener('click', async () => {
+            if (isTranscribing) return;
+
+            isTranscribing = true;
+            transcribeBtn.classList.add('transcribing');
+            transcribeBtn.innerHTML = '⟳';
+
+            try {
+                console.log('[Transcribe] Starting transcription...');
+
+                // Fetch the audio file
+                const audioUrl = message.file.url;
+                console.log('[Transcribe] Fetching audio from:', audioUrl);
+                const response = await fetch(audioUrl);
+                const audioBlob = await response.blob();
+                console.log('[Transcribe] Audio blob received, size:', audioBlob.size);
+
+                // Send to transcription API
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'voice_message.webm');
+
+                const apiUrl = getApiUrl();
+                console.log('[Transcribe] Sending to API:', apiUrl + '/api/transcribe');
+
+                const transcribeResponse = await fetch(`${apiUrl}/api/transcribe`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+
+                console.log('[Transcribe] Response status:', transcribeResponse.status);
+
+                if (!transcribeResponse.ok) {
+                    const errorText = await transcribeResponse.text();
+                    console.error('[Transcribe] Server error:', errorText);
+                    throw new Error('Transcription failed: ' + errorText);
+                }
+
+                const result = await transcribeResponse.json();
+                console.log('[Transcribe] Result:', result);
+
+                // Insert transcribed text into message input
+                const messageInput = document.getElementById('messageInput');
+                if (messageInput) {
+                    if (messageInput.value.trim()) {
+                        messageInput.value += ' ' + result.text;
+                    } else {
+                        messageInput.value = result.text;
+                    }
+                    messageInput.dispatchEvent(new Event('input'));
+                    console.log('[Transcribe] Text inserted into message input:', result.text);
+                } else {
+                    console.warn('[Transcribe] Message input not found');
+                }
+
+                transcribeBtn.innerHTML = '✓';
+                setTimeout(() => {
+                    transcribeBtn.innerHTML = `
+                        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M14.25 2.001c0-.892-.339-1.751-.948-2.405l-.859 1.135c.375.403.607.942.607 1.535 0 1.242-1.008 2.25-2.25 2.25s-2.25-1.008-2.25-2.25c0-.593.232-1.132.607-1.535L8.25 1.266c-.609.654-.948 1.513-.948 2.405 0 1.795 1.455 3.25 3.25 3.25s3.25-1.455 3.25-3.25v-1.669z"/>
+                            <path fill="currentColor" d="M12 7.5c-3.038 0-5.5 2.462-5.5 5.5v2.25H5.25c-.69 0-1.25.56-1.25 1.25v3c0 .69.56 1.25 1.25 1.25h13.5c.69 0 1.25-.56 1.25-1.25v-3c0-.69-.56-1.25-1.25-1.25H17.5v-2.25c0-3.038-2.462-5.5-5.5-5.5zm-3.5 5.5c0-1.933 1.567-3.5 3.5-3.5s3.5 1.567 3.5 3.5v2.25H8.5v-2.25z"/>
+                        </svg>
+                    `;
+                }, 2000);
+            } catch (error) {
+                console.error('[Transcribe] Error transcribing voice message:', error);
+                alert('Failed to transcribe: ' + error.message);
+                transcribeBtn.innerHTML = '✕';
+                setTimeout(() => {
+                    transcribeBtn.innerHTML = `
+                        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M14.25 2.001c0-.892-.339-1.751-.948-2.405l-.859 1.135c.375.403.607.942.607 1.535 0 1.242-1.008 2.25-2.25 2.25s-2.25-1.008-2.25-2.25c0-.593.232-1.132.607-1.535L8.25 1.266c-.609.654-.948 1.513-.948 2.405 0 1.795 1.455 3.25 3.25 3.25s3.25-1.455 3.25-3.25v-1.669z"/>
+                            <path fill="currentColor" d="M12 7.5c-3.038 0-5.5 2.462-5.5 5.5v2.25H5.25c-.69 0-1.25.56-1.25 1.25v3c0 .69.56 1.25 1.25 1.25h13.5c.69 0 1.25-.56 1.25-1.25v-3c0-.69-.56-1.25-1.25-1.25H17.5v-2.25c0-3.038-2.462-5.5-5.5-5.5zm-3.5 5.5c0-1.933 1.567-3.5 3.5-3.5s3.5 1.567 3.5 3.5v2.25H8.5v-2.25z"/>
+                        </svg>
+                    `;
+                }, 2000);
+            } finally {
+                isTranscribing = false;
+                transcribeBtn.classList.remove('transcribing');
+            }
         });
         
         // Update duration when metadata is loaded
@@ -2502,11 +2610,12 @@ function addMessageToUI(message) {
             window.voiceMessageElements = [];
         }
         // Store references to the elements for later restoration
-        window.voiceMessageElements.push({ audio, playBtn, speedBtn, durationDisplay });
-        
+        window.voiceMessageElements.push({ audio, playBtn, speedBtn, durationDisplay, transcribeBtn });
+
         // Add elements to containers
         controlsContainer.appendChild(playBtn);
         controlsContainer.appendChild(speedBtn);
+        controlsContainer.appendChild(transcribeBtn);
         controlsContainer.appendChild(durationDisplay);
         
         voiceContainer.appendChild(waveformContainer);
@@ -4855,13 +4964,9 @@ function createPeerConnection(remoteSocketId, isInitiator) {
         iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-            // Добавим TURN сервер для лучшей совместимости
+            // TURN сервер для лучшей совместимости
             { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
         ],
         iceCandidatePoolSize: 10
     });
@@ -4924,6 +5029,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
         let participantDiv = document.getElementById(`participant-${remoteSocketId}`);
         let remoteVideo = document.getElementById(`remote-${remoteSocketId}`);
 
+        // Create video element only once (on first track)
         if (!participantDiv) {
             participantDiv = document.createElement('div');
             participantDiv.className = 'participant';
@@ -4933,6 +5039,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             remoteVideo.id = `remote-${remoteSocketId}`;
             remoteVideo.autoplay = true;
             remoteVideo.playsInline = true;
+            remoteVideo.muted = false; // Don't mute remote video
             remoteVideo.volume = isDeafened ? 0 : 1; // Respect deafened state
 
             const participantName = document.createElement('div');
@@ -4942,6 +5049,12 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             participantDiv.appendChild(remoteVideo);
             participantDiv.appendChild(participantName);
             remoteParticipants.appendChild(participantDiv);
+            
+            console.log('Created video element for remote participant');
+        } else {
+            // Video element already exists, skip duplicate track handling
+            console.log('Video element already exists, skipping duplicate track');
+            return;
         }
 
         // Set the stream to the video element
@@ -4949,16 +5062,29 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             console.log('Setting remote stream to video element');
             remoteVideo = document.getElementById(`remote-${remoteSocketId}`);
             if (remoteVideo) {
+                // Stop previous stream if exists
+                if (remoteVideo.srcObject) {
+                    remoteVideo.srcObject.getTracks().forEach(track => track.stop());
+                }
+                
                 remoteVideo.srcObject = event.streams[0];
+                
+                // Force reload the video element
+                remoteVideo.load();
 
-                // Ensure audio is playing
-                remoteVideo.play().catch(e => {
-                    console.error('Error playing remote video:', e);
-                    // Try to play after user interaction
-                    document.addEventListener('click', () => {
-                        remoteVideo.play().catch(err => console.error('Still cannot play:', err));
-                    }, { once: true });
-                });
+                // Ensure audio/video is playing
+                const playVideo = () => {
+                    remoteVideo.play().catch(e => {
+                        console.warn('Cannot play yet, waiting for interaction:', e.message);
+                    });
+                };
+                
+                // Try immediately
+                playVideo();
+                
+                // Also try on user interaction if needed
+                document.addEventListener('click', playVideo, { once: true });
+                document.addEventListener('keydown', playVideo, { once: true });
             }
         }
 
@@ -6338,7 +6464,7 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
           stopRecording();
           shouldPreventClick = true;
         }
-        
+
         // Reset prevent flag after a short delay
         setTimeout(() => {
           shouldPreventClick = false;
@@ -6358,7 +6484,7 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
           stopRecording();
           shouldPreventClick = true;
         }
-        
+
         // Reset prevent flag after a short delay
         setTimeout(() => {
           shouldPreventClick = false;

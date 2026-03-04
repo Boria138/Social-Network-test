@@ -439,6 +439,173 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
     }
 });
 
+// Speech-to-text transcription using whisper-cpp
+app.post('/api/transcribe', authenticateToken, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+
+        const { spawn } = require('child_process');
+        const fs = require('fs');
+        const path = require('path');
+
+        // Path to whisper-cpp main executable
+        const whisperPath = process.env.WHISPER_CPP_PATH || '/usr/local/bin/whisper-cli';
+        const modelPath = process.env.WHISPER_CPP_MODEL || '/usr/local/share/whisper.cpp/ggml-tiny-q8_0.bin';
+        const audioFilter = process.env.FFMPEG_AUDIO_FILTER || 'loudnorm';
+        // Additional args from env or defaults for low-resource systems
+        const whisperExtraArgs = (process.env.WHISPER_CPP_ARGS || '--no-timestamps --language auto --threads 1').split(' ');
+
+        console.log('[Transcribe] File received:', req.file.filename, 'MIME:', req.file.mimetype, 'Size:', req.file.size);
+
+        // Check if whisper-cpp is available
+        if (!fs.existsSync(whisperPath)) {
+            console.warn('[Transcribe] whisper-cpp not found at:', whisperPath);
+            return res.status(503).json({ 
+                error: 'Transcription service unavailable',
+                message: 'whisper-cpp is not installed or configured'
+            });
+        }
+
+        if (!fs.existsSync(modelPath)) {
+            console.warn('[Transcribe] Whisper model not found at:', modelPath);
+            return res.status(503).json({ 
+                error: 'Transcription service unavailable',
+                message: 'Whisper model is not installed'
+            });
+        }
+
+        // Convert audio to WAV format optimized for whisper-cpp
+        // 16kHz sample rate (required by whisper), mono, 16-bit PCM
+        // Using compression filter to reduce dynamic range for better transcription
+        const wavPath = `/tmp/transcription_${Date.now()}.wav`;
+
+        const ffmpeg = spawn('ffmpeg', [
+            '-i', req.file.path,
+            '-ar', '16000',      // 16kHz sample rate (whisper requirement)
+            '-ac', '1',          // mono
+            '-c:a', 'pcm_s16le', // 16-bit PCM (best for whisper)
+            '-af', audioFilter,  // audio filter from env (default: loudnorm)
+            '-y',
+            wavPath
+        ]);
+
+        let ffmpegError = '';
+        ffmpeg.stderr.on('data', (data) => {
+            ffmpegError += data.toString();
+        });
+
+        ffmpeg.on('close', (code) => {
+            if (code !== 0) {
+                console.error('[Transcribe] FFmpeg conversion failed:', ffmpegError);
+                return res.status(500).json({ 
+                    error: 'Audio conversion failed',
+                    message: ffmpegError
+                });
+            }
+            
+            console.log('[Transcribe] FFmpeg conversion successful:', wavPath);
+            runWhisperTranscription(wavPath);
+        });
+
+        ffmpeg.on('error', (error) => {
+            console.error('[Transcribe] FFmpeg not available:', error.message);
+            return res.status(500).json({ 
+                error: 'FFmpeg not installed',
+                message: 'Please install ffmpeg: apt-get install ffmpeg'
+            });
+        });
+
+        function runWhisperTranscription(audioFilePath) {
+            console.log('[Transcribe] Running whisper-cpp on:', audioFilePath);
+
+            const tempOutputFile = `/tmp/transcription_${Date.now()}`;
+
+            // Build command arguments using whisperExtraArgs from outer scope
+            const whisperArgs = [
+                '-m', modelPath,
+                '-f', audioFilePath,
+                '--output-txt',
+                '--output-file', tempOutputFile,
+                ...whisperExtraArgs.filter(arg => arg.trim())
+            ];
+
+            console.log('[Transcribe] whisper-cpp command:', whisperPath, whisperArgs.join(' '));
+            
+            const whisper = spawn(whisperPath, whisperArgs);
+
+            let stderr = '';
+            whisper.stderr.on('data', (data) => {
+                stderr += data.toString();
+                console.log('[Transcribe] whisper-cpp stderr:', data.toString());
+            });
+
+            whisper.on('close', async (code) => {
+                try {
+                    if (code !== 0) {
+                        console.error('[Transcribe] whisper-cpp failed with code:', code, 'stderr:', stderr);
+                        // Cleanup only WAV file
+                        if (fs.existsSync(audioFilePath)) {
+                            fs.unlinkSync(audioFilePath);
+                            console.log('[Transcribe] Cleaned up WAV file:', audioFilePath);
+                        }
+                        return res.status(500).json({ 
+                            error: 'Transcription failed',
+                            message: stderr
+                        });
+                    }
+
+                    // Read the transcription result
+                    const outputFile = tempOutputFile + '.txt';
+                    console.log('[Transcribe] Looking for output file:', outputFile);
+                    
+                    if (fs.existsSync(outputFile)) {
+                        const transcription = fs.readFileSync(outputFile, 'utf8').trim();
+                        console.log('[Transcribe] Transcription result:', transcription);
+                        
+                        // Cleanup temp files (keep original upload)
+                        fs.unlinkSync(outputFile);
+                        console.log('[Transcribe] Cleaned up output file:', outputFile);
+                        
+                        fs.unlinkSync(audioFilePath);
+                        console.log('[Transcribe] Cleaned up WAV file:', audioFilePath);
+
+                        res.json({
+                            text: transcription || '(no speech detected)',
+                            language: 'auto-detected'
+                        });
+                    } else {
+                        console.warn('[Transcribe] Output file not found, returning empty');
+                        // Cleanup only WAV file
+                        if (fs.existsSync(audioFilePath)) fs.unlinkSync(audioFilePath);
+                        res.json({
+                            text: '',
+                            language: 'no-speech-detected'
+                        });
+                    }
+                } catch (error) {
+                    console.error('[Transcribe] Error reading transcription:', error);
+                    // Cleanup only WAV file
+                    if (fs.existsSync(audioFilePath)) fs.unlinkSync(audioFilePath);
+                    res.status(500).json({ error: 'Error reading transcription result' });
+                }
+            });
+
+            whisper.on('error', (error) => {
+                console.error('[Transcribe] Failed to start whisper-cpp:', error);
+                // Cleanup only WAV file
+                if (fs.existsSync(audioFilePath)) fs.unlinkSync(audioFilePath);
+                res.status(500).json({ error: 'Failed to start transcription service' });
+            });
+        }
+
+    } catch (error) {
+        console.error('[Transcribe] Transcription error:', error);
+        res.status(500).json({ error: 'Transcription failed' });
+    }
+});
+
 
 // Get direct messages
 app.get('/api/dm/:userId', authenticateToken, async (req, res) => {

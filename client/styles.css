@@ -3761,3 +3761,20 @@ body.drawer-open{
     z-index: 10 !important;
     font-weight: bold !important;
 }
+
+.voice-transcribe-small-btn {
+    transition: all 0.2s ease;
+}
+
+.voice-transcribe-small-btn:hover {
+    background: var(--glass) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+
+.voice-transcribe-small-btn.transcribing {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+    animation: pulse-transcribe 1.5s infinite;
+}

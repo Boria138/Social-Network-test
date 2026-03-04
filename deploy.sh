@@ -50,6 +50,54 @@ if ! command -v pm2 &> /dev/null; then
     npm install -g pm2
 fi
 
+# Install whisper-cpp for speech-to-text (optimized for low-resource VPS)
+if ! command -v whisper-cli &> /dev/null; then
+    echo "Installing whisper-cpp (optimized for 1 CPU, 1GB RAM)..."
+    apt-get update
+    apt-get install -y build-essential cmake git ffmpeg ccache
+
+    # Install to /opt/whisper.cpp (persistent location)
+    mkdir -p /opt
+    cd /opt
+    
+    # Clone only if not already cloned
+    if [ ! -d "whisper.cpp" ]; then
+        git clone https://github.com/ggerganov/whisper.cpp.git
+    fi
+
+    cd whisper.cpp
+
+    # Build only if not already built
+    if [ ! -f "build/bin/whisper-cli" ]; then
+        echo "Building whisper-cpp..."
+        make -j$(nproc) WHISPER_OPENVINO=0 WHISPER_COREML=0 WHISPER_METAL=0
+    else
+        echo "whisper-cpp already built, skipping build step..."
+    fi
+
+    # Create symlink to binary
+    ln -sf /opt/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
+
+    # Download tiny-q8_0 model directly to /usr/local/share/whisper.cpp
+    if [ ! -f "/usr/local/share/whisper.cpp/ggml-tiny-q8_0.bin" ]; then
+        echo "Downloading whisper tiny-q8_0 model (~40MB)..."
+        mkdir -p /usr/local/share/whisper.cpp
+        ./models/download-ggml-model.sh tiny-q8_0 /usr/local/share/whisper.cpp
+    else
+        echo "Model already exists, skipping download..."
+    fi
+
+    echo "whisper-cpp installed successfully"
+else
+    echo "whisper-cpp already installed"
+    # Ensure ffmpeg is installed
+    if ! command -v ffmpeg &> /dev/null; then
+        echo "Installing ffmpeg..."
+        apt-get update
+        apt-get install -y ffmpeg
+    fi
+fi
+
 # Create app directory
 mkdir -p $APP_DIR
 
