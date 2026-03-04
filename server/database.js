@@ -392,9 +392,41 @@ const userDB = {
         return Promise.resolve(stmt.get(email));
     },
 
+    findByUsername: (username) => {
+        const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
+        return Promise.resolve(stmt.get(username));
+    },
+
     findById: (id) => {
         const stmt = db.prepare('SELECT id, username, email, avatar, status FROM users WHERE id = ?');
         return Promise.resolve(stmt.get(id));
+    },
+
+    findAll: () => {
+        const stmt = db.prepare('SELECT id, username, email, avatar, status FROM users');
+        return Promise.resolve(stmt.all());
+    },
+
+    update: (id, updates) => {
+        const fields = [];
+        const values = [];
+        if (updates.username) {
+            fields.push('username = ?');
+            values.push(updates.username);
+        }
+        if (updates.avatar !== undefined) {
+            fields.push('avatar = ?');
+            values.push(updates.avatar);
+        }
+        if (updates.status) {
+            fields.push('status = ?');
+            values.push(updates.status);
+        }
+        if (fields.length === 0) return Promise.resolve();
+        values.push(id);
+        const stmt = db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`);
+        stmt.run(...values);
+        return Promise.resolve();
     },
 
     updateStatus: (id, status) => {
@@ -457,6 +489,11 @@ const dmDB = {
             LEFT JOIN users reply_sender ON reply_dm.sender_id = reply_sender.id
             WHERE dm.id = ?
         `);
+        return Promise.resolve(stmt.get(messageId));
+    },
+
+    findById: (messageId) => {
+        const stmt = db.prepare('SELECT * FROM direct_messages WHERE id = ?');
         return Promise.resolve(stmt.get(messageId));
     },
 
@@ -531,10 +568,32 @@ const reactionDB = {
         return Promise.resolve({ id: result.lastInsertRowid, emoji, messageId, userId });
     },
 
+    create: (messageId, userId, emoji) => {
+        const stmt = db.prepare('INSERT OR IGNORE INTO reactions (emoji, message_id, user_id) VALUES (?, ?, ?)');
+        const result = stmt.run(emoji, messageId, userId);
+        return Promise.resolve({ id: result.lastInsertRowid, emoji, messageId, userId });
+    },
+
+    delete: (reactionId) => {
+        const stmt = db.prepare('DELETE FROM reactions WHERE id = ?');
+        stmt.run(reactionId);
+        return Promise.resolve();
+    },
+
     remove: (emoji, messageId, userId) => {
         const stmt = db.prepare('DELETE FROM reactions WHERE emoji = ? AND message_id = ? AND user_id = ?');
         stmt.run(emoji, messageId, userId);
         return Promise.resolve();
+    },
+
+    findByMessageAndUser: (messageId, userId, emoji) => {
+        const stmt = db.prepare('SELECT * FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?');
+        return Promise.resolve(stmt.get(messageId, userId, emoji));
+    },
+
+    findByMessage: (messageId) => {
+        const stmt = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ?');
+        return Promise.resolve(stmt.all(messageId));
     },
 
     getByMessage: (messageId) => {

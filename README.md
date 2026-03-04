@@ -101,17 +101,72 @@ WHISPER_CPP_MODEL=/usr/local/share/whisper.cpp/ggml-tiny-q8_0.bin
 
 ## API
 
+### Аутентификация
+
 | Метод | Endpoint | Описание |
 |-------|----------|----------|
-| POST | /api/register | Регистрация |
-| POST | /api/login | Вход |
-| POST | /api/logout | Выход |
-| GET | /api/users | Пользователи |
-| GET | /api/dm/:userId | Получить личные сообщения с пользователем |
-| GET | /api/friends | Друзья |
-| POST | /api/friends/request | Запрос в друзья |
-| POST | /api/upload | Загрузка файла |
+| POST | /api/register | Регистрация нового пользователя |
+| POST | /api/login | Вход (возвращает токен сессии) |
+| POST | /api/logout | Выход (требует токен) |
+| GET | /api/user/profile | Получить профиль текущего пользователя |
+| PUT | /api/user/profile | Обновить профиль пользователя |
+
+### Пользователи
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | /api/users | Список всех пользователей |
+| GET | /api/users/search?q=query | Поиск пользователей по имени |
+
+### Личные сообщения (DM)
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | /api/dm/:userId | Получить историю переписки с пользователем |
+| POST | /api/dm/:userId | Отправить сообщение пользователю |
+| PUT | /api/dm/:messageId | Редактировать своё сообщение |
+| DELETE | /api/dm/:messageId | Удалить сообщение |
+| POST | /api/dm/:messageId/reaction | Добавить реакцию на сообщение |
+| DELETE | /api/dm/:messageId/reaction/:emoji | Удалить реакцию с сообщения |
+
+### Друзья
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | /api/friends | Список друзей |
+| GET | /api/friends/pending | Входящие заявки в друзья |
+| POST | /api/friends/request | Отправить заявку в друзья |
+| POST | /api/friends/accept | Принять заявку в друзья |
+| POST | /api/friends/reject | Отклонить заявку в друзья |
+| DELETE | /api/friends/:friendId | Удалить из друзей |
+
+### Уведомления
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | /api/notifications | Получить все уведомления |
+| GET | /api/notifications/unread | Получить непрочитанные уведомления |
+| POST | /api/notifications/mark-all-read | Отметить все уведомления прочитанными |
+| POST | /api/notifications/mark-user-read | Отметить уведомления от пользователя прочитанными |
+| DELETE | /api/notifications/:notificationId | Удалить уведомление |
+| DELETE | /api/notifications | Удалить все уведомления |
+
+### Серверы и каналы
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| POST | /api/servers | Создать сервер |
+| GET | /api/servers | Список серверов пользователя |
+| GET | /api/servers/:serverId/members | Участники сервера |
+| GET | /api/channels/system | Системный канал новостей |
+
+### Файлы и медиа
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| POST | /api/upload | Загрузить файл (до 10MB) |
 | POST | /api/transcribe | Транскрипция голосового сообщения |
+| GET | /api/link-preview | Получить preview ссылки (Open Graph) |
 
 ## Команды PM2
 

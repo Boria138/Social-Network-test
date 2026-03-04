@@ -676,6 +676,80 @@ app.get('/api/dm/:userId', authenticateToken, async (req, res) => {
     }
 });
 
+// Send direct message via HTTP (native mobile clients)
+app.post('/api/dm/:userId', authenticateToken, async (req, res) => {
+    try {
+        const receiverId = Number(req.params.userId);
+        const rawText = typeof req.body?.text === 'string' ? req.body.text : '';
+        const text = rawText.trim();
+
+        if (!Number.isInteger(receiverId) || receiverId <= 0) {
+            return res.status(400).json({ error: 'Invalid receiver ID' });
+        }
+
+        if (!text) {
+            return res.status(400).json({ error: 'Message text is required' });
+        }
+
+        if (text.length > 4000) {
+            return res.status(400).json({ error: 'Message is too long (max 4000 chars)' });
+        }
+
+        const receiver = await userDB.findById(receiverId);
+        if (!receiver) {
+            return res.status(404).json({ error: 'Receiver not found' });
+        }
+
+        const sender = await userDB.findById(req.user.id);
+        if (!sender) {
+            return res.status(404).json({ error: 'Sender not found' });
+        }
+
+        const rawTimestamp = typeof req.body?.timestamp === 'string' ? req.body.timestamp : '';
+        const timestamp = Number.isNaN(Date.parse(rawTimestamp)) ? new Date().toISOString() : rawTimestamp;
+
+        const savedMessage = await dmDB.create(text, req.user.id, receiverId, timestamp, null);
+        await notificationDB.create(receiverId, req.user.id, 'message', text);
+
+        const payload = {
+            id: savedMessage.id,
+            content: text,
+            sender_id: req.user.id,
+            receiver_id: receiverId,
+            username: sender.username,
+            avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
+            created_at: timestamp,
+            reactions: [],
+            file: null,
+            edited: false,
+            replyTo: null
+        };
+
+        // Keep web clients in sync if receiver is online.
+        const receiverSocket = Array.from(users.values()).find(user => user.id === receiverId);
+        if (receiverSocket) {
+            io.to(receiverSocket.socketId).emit('new-dm', {
+                senderId: req.user.id,
+                message: {
+                    id: savedMessage.id,
+                    author: sender.username,
+                    avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
+                    text: text,
+                    timestamp: timestamp,
+                    reactions: [],
+                    file: null,
+                    replyTo: null
+                }
+            });
+        }
+
+        res.status(201).json(payload);
+    } catch (error) {
+        console.error('Send DM HTTP error:', error);
+        res.status(500).json({ error: 'Failed to send message' });
+    }
+});
+
 // Server routes
 app.post('/api/servers', authenticateToken, async (req, res) => {
     try {
@@ -1421,6 +1495,215 @@ io.on('connection', async (socket) => {
             io.emit('user-list-update', Array.from(users.values()));
         }
     });
+});
+
+// Update user profile
+app.put('/api/user/profile', authenticateToken, async (req, res) => {
+    try {
+        const { username, avatar, status } = req.body;
+        const userId = req.user.id;
+
+        if (username && username.length < 2) {
+            return res.status(400).json({ error: 'Username must be at least 2 characters' });
+        }
+
+        if (username) {
+            const existing = await userDB.findByUsername(username);
+            if (existing && existing.id !== userId) {
+                return res.status(400).json({ error: 'Username already taken' });
+            }
+        }
+
+        const updates = {};
+        if (username) updates.username = username;
+        if (avatar !== undefined) updates.avatar = avatar;
+        if (status) updates.status = status;
+
+        await userDB.update(userId, updates);
+        const updatedUser = await userDB.findById(userId);
+
+        res.json({
+            id: updatedUser.id,
+            username: updatedUser.username,
+            email: updatedUser.email,
+            avatar: updatedUser.avatar,
+            status: updatedUser.status
+        });
+    } catch (error) {
+        console.error('Update profile error:', error);
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
+
+// Search users
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+    try {
+        const { q } = req.query;
+
+        if (!q || q.length < 2) {
+            return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+        }
+
+        const allUsers = await userDB.findAll();
+        const filtered = allUsers
+            .filter(u => u.id !== req.user.id && u.username.toLowerCase().includes(q.toLowerCase()))
+            .slice(0, 20);
+
+        res.json(filtered.map(u => ({
+            id: u.id,
+            username: u.username,
+            avatar: u.avatar,
+            status: u.status
+        })));
+    } catch (error) {
+        console.error('Search users error:', error);
+        res.status(500).json({ error: 'Failed to search users' });
+    }
+});
+
+// Edit message
+app.put('/api/dm/:messageId', authenticateToken, async (req, res) => {
+    try {
+        const messageId = Number(req.params.messageId);
+        const { text } = req.body;
+
+        if (!Number.isInteger(messageId) || messageId <= 0) {
+            return res.status(400).json({ error: 'Invalid message ID' });
+        }
+
+        if (!text || text.trim().length === 0) {
+            return res.status(400).json({ error: 'Message text is required' });
+        }
+
+        if (text.length > 4000) {
+            return res.status(400).json({ error: 'Message is too long (max 4000 chars)' });
+        }
+
+        const message = await dmDB.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+
+        if (message.sender_id !== req.user.id) {
+            return res.status(403).json({ error: 'Not authorized to edit this message' });
+        }
+
+        await dmDB.update(messageId, { content: text.trim(), is_edited: true });
+        const updated = await dmDB.findById(messageId);
+
+        const sender = await userDB.findById(req.user.id);
+        res.json({
+            id: updated.id,
+            content: updated.content,
+            sender_id: req.user.id,
+            receiver_id: updated.receiver_id,
+            username: sender.username,
+            avatar: sender.avatar || sender.username.charAt(0).toUpperCase(),
+            created_at: updated.created_at,
+            edited: true,
+            replyTo: null
+        });
+    } catch (error) {
+        console.error('Edit message error:', error);
+        res.status(500).json({ error: 'Failed to edit message' });
+    }
+});
+
+// Delete message
+app.delete('/api/dm/:messageId', authenticateToken, async (req, res) => {
+    try {
+        const messageId = Number(req.params.messageId);
+
+        if (!Number.isInteger(messageId) || messageId <= 0) {
+            return res.status(400).json({ error: 'Invalid message ID' });
+        }
+
+        const message = await dmDB.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+
+        if (message.sender_id !== req.user.id && message.receiver_id !== req.user.id) {
+            return res.status(403).json({ error: 'Not authorized to delete this message' });
+        }
+
+        await dmDB.delete(messageId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete message error:', error);
+        res.status(500).json({ error: 'Failed to delete message' });
+    }
+});
+
+// Add reaction to message
+app.post('/api/dm/:messageId/reaction', authenticateToken, async (req, res) => {
+    try {
+        const messageId = Number(req.params.messageId);
+        const { emoji } = req.body;
+
+        if (!Number.isInteger(messageId) || messageId <= 0) {
+            return res.status(400).json({ error: 'Invalid message ID' });
+        }
+
+        if (!emoji || typeof emoji !== 'string') {
+            return res.status(400).json({ error: 'Emoji is required' });
+        }
+
+        const message = await dmDB.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+
+        const existing = await reactionDB.findByMessageAndUser(messageId, req.user.id, emoji);
+        if (existing) {
+            return res.status(400).json({ error: 'Reaction already exists' });
+        }
+
+        await reactionDB.create(messageId, req.user.id, emoji);
+        const reactions = await reactionDB.findByMessage(messageId);
+
+        res.json({
+            message_id: messageId,
+            reactions: reactions.map(r => ({
+                emoji: r.emoji,
+                user_id: r.user_id
+            }))
+        });
+    } catch (error) {
+        console.error('Add reaction error:', error);
+        res.status(500).json({ error: 'Failed to add reaction' });
+    }
+});
+
+// Remove reaction from message
+app.delete('/api/dm/:messageId/reaction/:emoji', authenticateToken, async (req, res) => {
+    try {
+        const messageId = Number(req.params.messageId);
+        const emoji = decodeURIComponent(req.params.emoji);
+
+        if (!Number.isInteger(messageId) || messageId <= 0) {
+            return res.status(400).json({ error: 'Invalid message ID' });
+        }
+
+        const reaction = await reactionDB.findByMessageAndUser(messageId, req.user.id, emoji);
+        if (!reaction) {
+            return res.status(404).json({ error: 'Reaction not found' });
+        }
+
+        await reactionDB.delete(reaction.id);
+        const reactions = await reactionDB.findByMessage(messageId);
+
+        res.json({
+            message_id: messageId,
+            reactions: reactions.map(r => ({
+                emoji: r.emoji,
+                user_id: r.user_id
+            }))
+        });
+    } catch (error) {
+        console.error('Remove reaction error:', error);
+        res.status(500).json({ error: 'Failed to remove reaction' });
+    }
 });
 
 // SPA fallback - serve index.html for routes without file extension
