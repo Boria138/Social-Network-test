@@ -13,6 +13,7 @@ const fs = require('fs');
 const { JSDOM } = require('jsdom');
 
 const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, channelDB, sessionDB, notificationDB } = require('./database');
+const { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS } = require('./config');
 
 const app = express();
 
@@ -119,20 +120,9 @@ const upload = multer({
     storage: storage,
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        const allowedMimeTypes = [
-            'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-            'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'text/plain', 'audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/webm', 'audio/opus',
-            'video/mp4', 'video/webm', 'video/quicktime',
-            'application/zip', 'application/x-rar-compressed'
-        ];
-
-        const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.pdf', '.doc', '.docx',
-                                   '.txt', '.mp3', '.mp4', '.webm', '.mov', '.zip', '.rar', '.ogg', '.opus'];
-
         const ext = path.extname(file.originalname).toLowerCase();
 
-        if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(ext)) {
+        if (ALLOWED_MIME_TYPES.includes(file.mimetype) || ALLOWED_EXTENSIONS.includes(ext)) {
             cb(null, true);
         } else {
             cb(null, true);

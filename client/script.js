@@ -2113,14 +2113,16 @@ function updateRecordingUI(show) {
 
 async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
     try {
-        // Determine file extension based on MIME type
-        let fileExtension = 'webm';
-        if (mimeType.includes('ogg')) {
-            fileExtension = 'ogg';
-        } else if (mimeType.includes('mp4')) {
-            fileExtension = 'mp4';
-        } else if (mimeType.includes('webm')) {
-            fileExtension = 'webm';
+        // Determine file extension using centralized function
+        let fileExtension = getFileExtensionFromMime(mimeType);
+        
+        // Fallback for wav or unknown types
+        if (!fileExtension || fileExtension === 'bin') {
+            if (mimeType.includes('wav')) {
+                fileExtension = 'wav';
+            } else {
+                fileExtension = 'webm';
+            }
         }
 
         // Create a unique filename with voice prefix
