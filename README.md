@@ -1,92 +1,92 @@
-# Discord Clone - Direct Messages Only
+# Voxii
 
-Упрощённое приложение для общения с поддержкой только личных сообщений (Direct Messages), голосовыми/видео звонками, демонстрацией экрана и файлообменом.
+Real-time chat application with voice/video calls, file sharing, and notifications.
 
-Работает на Linux, Windows, Android и любой платформе с браузером.
+Works on Linux, Windows, Android and any platform with a browser.
 
-## Возможности
+## Features
 
-- **Аутентификация** — сессионные токены, bcrypt хеширование
-- **Real-time чат** — личные сообщения (DM), системный канал новостей, Socket.IO
-- **Голосовые/видео звонки** — WebRTC, HD видео, определение голосовой активности
-- **Демонстрация экрана** — весь экран или отдельные окна
-- **Файлообмен** — до 10MB, изображения, документы, медиа
-- **Реакции** — эмодзи на сообщения
-- **Поиск пользователей** — возможность найти и добавить в друзья других пользователей
-- **Системный канал «Новости»** — официальный канал для объявлений (принудительная подписка)
-- **Транскрипция голосовых сообщений** — преобразование речи в текст через whisper-cpp
+- **Authentication** — session tokens, bcrypt hashing
+- **Real-time chat** — direct messages (DM), system news channel, Socket.IO
+- **Voice/Video calls** — WebRTC, HD video, voice activity detection
+- **Screen sharing** — full screen or individual windows
+- **File sharing** — up to 10MB, images, documents, media
+- **Reactions** — emoji on messages
+- **User search** — find and add friends
+- **System News Channel** — official channel for announcements (forced subscription)
+- **Voice message transcription** — speech-to-text via whisper-cpp
 
-## Структура проекта
+## Project Structure
 
 ```
-discord-clone/
-├── client/                 # Web клиент
+voxii/
+├── client/                 # Web client
 │   ├── index.html
 │   ├── login.html
 │   └── package.json
-├── server/                 # API сервер
+├── server/                 # API server
 │   ├── server.js           # Express + Socket.IO
 │   ├── database.js         # SQLite
 │   └── package.json
-├── deploy.sh               # Скрипт деплоя
+├── deploy.sh               # Deploy script
 └── README.md
 ```
 
-## Сборка и запуск проекта
+## Build and Run
 
 ```bash
-# Собрать проект (установить зависимости и собрать клиент)
+# Build project (install dependencies and build client)
 npm run build:all
 
-# Или только клиентскую часть
+# Or client only
 npm run build
 
-# Полная сборка и запуск production версии
+# Full build and run production
 npm run serve
 ```
 
-## Деплой на VPS
+## Deploy to VPS
 
-Клиент и сервер хостятся вместе — один порт, один адрес.
+Client and server are hosted together — one port, one address.
 
 ```bash
 ./deploy.sh root@YOUR_SERVER_IP
 ```
 
-После деплоя открыть: `http://YOUR_SERVER_IP:3000`
+After deploy open: `http://YOUR_SERVER_IP:3000`
 
-### Что делает скрипт
+### What the script does
 
-1. Собирает клиент (`npm run build`)
-2. Загружает `server/` и `client/dist/` на VPS
-3. Устанавливает Node.js и PM2 (если нет)
-4. Запускает сервер через PM2
+1. Builds client (`npm run build`)
+2. Uploads `server/` and `client/dist/` to VPS
+3. Installs Node.js and PM2 (if not installed)
+4. Starts server via PM2
 
-### Ручной деплой
+### Manual Deploy
 
 ```bash
-# Локально - собрать клиент
+# Local - build client
 cd client && npm install && npm run build && cd ..
 
-# Загрузить на сервер
-scp -r server client/dist root@YOUR_SERVER_IP:/opt/discord-clone/
+# Upload to server
+scp -r server client/dist root@YOUR_SERVER_IP:/opt/voxii/
 
-# На сервере
+# On server
 ssh root@YOUR_SERVER_IP
-cd /opt/discord-clone/server
+cd /opt/voxii/server
 npm install --production
 npm install -g pm2
-pm2 start server.js --name discord-api
+pm2 start server.js --name voxii
 pm2 save
 ```
 
-### Открыть порт
+### Open Port
 
 ```bash
 ufw allow 3000
 ```
 
-## Конфигурация
+## Configuration
 
 ### server/.env
 
@@ -101,99 +101,99 @@ WHISPER_CPP_MODEL=/usr/local/share/whisper.cpp/ggml-tiny-q8_0.bin
 
 ## API
 
-### Аутентификация
+### Authentication
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| POST | /api/register | Регистрация нового пользователя |
-| POST | /api/login | Вход (возвращает токен сессии) |
-| POST | /api/logout | Выход (требует токен) |
-| GET | /api/user/profile | Получить профиль текущего пользователя |
-| PUT | /api/user/profile | Обновить профиль пользователя |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/register | Register new user |
+| POST | /api/login | Login (returns session token) |
+| POST | /api/logout | Logout (requires token) |
+| GET | /api/user/profile | Get current user profile |
+| PUT | /api/user/profile | Update user profile |
 
-### Пользователи
+### Users
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| GET | /api/users | Список всех пользователей |
-| GET | /api/users/search?q=query | Поиск пользователей по имени |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/users | List all users |
+| GET | /api/users/search?q=query | Search users by name |
 
-### Личные сообщения (DM)
+### Direct Messages (DM)
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| GET | /api/dm/:userId | Получить историю переписки с пользователем |
-| POST | /api/dm/:userId | Отправить сообщение пользователю |
-| PUT | /api/dm/:messageId | Редактировать своё сообщение |
-| DELETE | /api/dm/:messageId | Удалить сообщение |
-| POST | /api/dm/:messageId/reaction | Добавить реакцию на сообщение |
-| DELETE | /api/dm/:messageId/reaction/:emoji | Удалить реакцию с сообщения |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/dm/:userId | Get chat history with user |
+| POST | /api/dm/:userId | Send message to user |
+| PUT | /api/dm/:messageId | Edit your message |
+| DELETE | /api/dm/:messageId | Delete message |
+| POST | /api/dm/:messageId/reaction | Add reaction to message |
+| DELETE | /api/dm/:messageId/reaction/:emoji | Remove reaction from message |
 
-### Друзья
+### Friends
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| GET | /api/friends | Список друзей |
-| GET | /api/friends/pending | Входящие заявки в друзья |
-| POST | /api/friends/request | Отправить заявку в друзья |
-| POST | /api/friends/accept | Принять заявку в друзья |
-| POST | /api/friends/reject | Отклонить заявку в друзья |
-| DELETE | /api/friends/:friendId | Удалить из друзей |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/friends | List friends |
+| GET | /api/friends/pending | Pending friend requests |
+| POST | /api/friends/request | Send friend request |
+| POST | /api/friends/accept | Accept friend request |
+| POST | /api/friends/reject | Reject friend request |
+| DELETE | /api/friends/:friendId | Remove friend |
 
-### Уведомления
+### Notifications
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| GET | /api/notifications | Получить все уведомления |
-| GET | /api/notifications/unread | Получить непрочитанные уведомления |
-| POST | /api/notifications/mark-all-read | Отметить все уведомления прочитанными |
-| POST | /api/notifications/mark-user-read | Отметить уведомления от пользователя прочитанными |
-| DELETE | /api/notifications/:notificationId | Удалить уведомление |
-| DELETE | /api/notifications | Удалить все уведомления |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/notifications | Get all notifications |
+| GET | /api/notifications/unread | Get unread notifications |
+| POST | /api/notifications/mark-all-read | Mark all as read |
+| POST | /api/notifications/mark-user-read | Mark notifications from user as read |
+| DELETE | /api/notifications/:notificationId | Delete notification |
+| DELETE | /api/notifications | Delete all notifications |
 
-### Серверы и каналы
+### Servers and Channels
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| POST | /api/servers | Создать сервер |
-| GET | /api/servers | Список серверов пользователя |
-| GET | /api/servers/:serverId/members | Участники сервера |
-| GET | /api/channels/system | Системный канал новостей |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/servers | Create server |
+| GET | /api/servers | List user's servers |
+| GET | /api/servers/:serverId/members | Server members |
+| GET | /api/channels/system | System news channel |
 
-### Файлы и медиа
+### Files and Media
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| POST | /api/upload | Загрузить файл (до 10MB) |
-| POST | /api/transcribe | Транскрипция голосового сообщения |
-| GET | /api/link-preview | Получить preview ссылки (Open Graph) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/upload | Upload file (max 10MB) |
+| POST | /api/transcribe | Transcribe voice message |
+| GET | /api/link-preview | Get link preview (Open Graph) |
 
-## Команды PM2
+## PM2 Commands
 
 ```bash
-pm2 status              # Статус
-pm2 logs discord-api    # Логи
-pm2 restart discord-api # Перезапуск
-pm2 stop discord-api    # Остановить
+pm2 status              # Status
+pm2 logs voxii          # Logs
+pm2 restart voxii       # Restart
+pm2 stop voxii          # Stop
 ```
 
-## Решение проблем
+## Troubleshooting
 
-### Не открывается сайт
-- Проверьте что порт 3000 открыт: `ufw allow 3000`
-- Проверьте статус: `pm2 status`
-- Смотрите логи: `pm2 logs discord-api`
+### Site won't open
+- Check port 3000 is open: `ufw allow 3000`
+- Check status: `pm2 status`
+- View logs: `pm2 logs voxii`
 
-### Камера/микрофон не работают
-- Для WebRTC нужен HTTPS (кроме localhost)
-- Настройте nginx с SSL сертификатом
+### Camera/microphone not working
+- WebRTC requires HTTPS (except localhost)
+- Configure nginx with SSL certificate
 
-### Транскрипция не работает
-- Проверьте установку whisper-cpp: `whisper-cli --help`
-- Убедитесь что модель загружена: `ls /usr/local/share/whisper.cpp/`
-- Для VPS с 1GB RAM используйте модель `tiny-q8_0` (~40MB RAM)
-- Проверьте логи: `pm2 logs discord-api | grep Transcribe`
+### Transcription not working
+- Check whisper-cpp installation: `whisper-cli --help`
+- Verify model is downloaded: `ls /usr/local/share/whisper.cpp/`
+- For VPS with 1GB RAM use `tiny-q8_0` model (~40MB RAM)
+- Check logs: `pm2 logs voxii | grep Transcribe`
 
-## Лицензия
+## License
 
 MIT
