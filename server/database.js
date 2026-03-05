@@ -205,6 +205,36 @@ function initializeDatabase() {
         }
     }
 
+    // Миграция: добавляем колонку updated_at если её нет
+    try {
+        db.exec('ALTER TABLE direct_messages ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP');
+        console.log('Migration: Added updated_at column to direct_messages');
+    } catch (error) {
+        if (!error.message.includes('duplicate column')) {
+            console.error('Migration error:', error);
+        }
+    }
+
+    // Миграция: добавляем колонку is_edited если её нет
+    try {
+        db.exec('ALTER TABLE direct_messages ADD COLUMN is_edited BOOLEAN DEFAULT FALSE');
+        console.log('Migration: Added is_edited column to direct_messages');
+    } catch (error) {
+        if (!error.message.includes('duplicate column')) {
+            console.error('Migration error:', error);
+        }
+    }
+
+    // Миграция: добавляем колонку original_content если её нет
+    try {
+        db.exec('ALTER TABLE direct_messages ADD COLUMN original_content TEXT');
+        console.log('Migration: Added original_content column to direct_messages');
+    } catch (error) {
+        if (!error.message.includes('duplicate column')) {
+            console.error('Migration error:', error);
+        }
+    }
+
     // Миграция: создаем таблицу channels если нет
     try {
         db.exec(`
@@ -499,13 +529,13 @@ const dmDB = {
 
     update: (messageId, newContent) => {
         const originalMessage = dmDB.getById(messageId);
-        
+
         return originalMessage.then(msg => {
             if (!msg.is_edited) {
-                const stmt = db.prepare('UPDATE direct_messages SET content = ?, original_content = ?, updated_at = CURRENT_TIMESTAMP, is_edited = TRUE WHERE id = ?');
+                const stmt = db.prepare('UPDATE direct_messages SET content = ?, original_content = ?, is_edited = TRUE WHERE id = ?');
                 stmt.run(newContent, msg.content, messageId);
             } else {
-                const stmt = db.prepare('UPDATE direct_messages SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+                const stmt = db.prepare('UPDATE direct_messages SET content = ? WHERE id = ?');
                 stmt.run(newContent, messageId);
             }
             return Promise.resolve();
@@ -563,12 +593,26 @@ const fileDB = {
 // Reaction operations
 const reactionDB = {
     add: (emoji, messageId, userId) => {
+        // Сначала проверяем, существует ли сообщение
+        const message = db.prepare('SELECT id FROM direct_messages WHERE id = ?').get(messageId);
+        if (!message) {
+            console.error('[REACTION DB] Сообщение не найдено для добавления реакции:', messageId);
+            return Promise.reject(new Error('Message not found'));
+        }
+        
         const stmt = db.prepare('INSERT OR IGNORE INTO reactions (emoji, message_id, user_id) VALUES (?, ?, ?)');
         const result = stmt.run(emoji, messageId, userId);
         return Promise.resolve({ id: result.lastInsertRowid, emoji, messageId, userId });
     },
 
     create: (messageId, userId, emoji) => {
+        // Сначала проверяем, существует ли сообщение
+        const message = db.prepare('SELECT id FROM direct_messages WHERE id = ?').get(messageId);
+        if (!message) {
+            console.error('[REACTION DB] Сообщение не найдено для создания реакции:', messageId);
+            return Promise.reject(new Error('Message not found'));
+        }
+        
         const stmt = db.prepare('INSERT OR IGNORE INTO reactions (emoji, message_id, user_id) VALUES (?, ?, ?)');
         const result = stmt.run(emoji, messageId, userId);
         return Promise.resolve({ id: result.lastInsertRowid, emoji, messageId, userId });
