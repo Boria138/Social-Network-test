@@ -655,15 +655,21 @@ const reactionDB = {
 // Friend operations
 const friendDB = {
     sendRequest: (userId, friendId) => {
-        const stmt = db.prepare('INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "pending")');
+        // Check if request already exists
+        const existing = db.prepare('SELECT id FROM friends WHERE user_id = ? AND friend_id = ?').get(userId, friendId);
+        if (existing) {
+            return Promise.resolve({ changes: 0, error: 'Request already exists' });
+        }
+
+        const stmt = db.prepare("INSERT INTO friends (user_id, friend_id, status) VALUES (?, ?, 'pending')");
         const result = stmt.run(userId, friendId);
-        return Promise.resolve({ changes: result.changes });
+        return Promise.resolve({ changes: result.changes, lastInsertRowid: result.lastInsertRowid });
     },
 
     acceptRequest: (userId, friendId) => {
         db.transaction(() => {
-            db.prepare('UPDATE friends SET status = "accepted" WHERE user_id = ? AND friend_id = ?').run(friendId, userId);
-            db.prepare('INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "accepted")').run(userId, friendId);
+            db.prepare("UPDATE friends SET status = 'accepted' WHERE user_id = ? AND friend_id = ?").run(friendId, userId);
+            db.prepare("INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, 'accepted')").run(userId, friendId);
         })();
         return Promise.resolve();
     },
@@ -703,7 +709,7 @@ const friendDB = {
     },
 
     checkFriendship: (userId, friendId) => {
-        const stmt = db.prepare('SELECT * FROM friends WHERE user_id = ? AND friend_id = ? AND status = "accepted"');
+        const stmt = db.prepare("SELECT * FROM friends WHERE user_id = ? AND friend_id = ? AND status = 'accepted'");
         const row = stmt.get(userId, friendId);
         return Promise.resolve(!!row);
     }
@@ -1012,7 +1018,7 @@ const sessionDB = {
     },
 
     deleteExpired: () => {
-        const stmt = db.prepare('DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime("now")');
+        const stmt = db.prepare("DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime('now')");
         stmt.run();
         return Promise.resolve();
     },

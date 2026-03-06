@@ -826,7 +826,21 @@ app.get('/api/friends/pending', authenticateToken, async (req, res) => {
 app.post('/api/friends/request', authenticateToken, async (req, res) => {
     try {
         const { friendId } = req.body;
+        console.log('Friend request: user=%s, friendId=%s', req.user.id, friendId);
+        
+        if (!friendId) {
+            return res.status(400).json({ error: 'friendId is required' });
+        }
+        
+        if (friendId === req.user.id.toString()) {
+            return res.status(400).json({ error: 'Cannot send friend request to yourself' });
+        }
+        
         const result = await friendDB.sendRequest(req.user.id, friendId);
+
+        if (result.error) {
+            return res.status(409).json({ error: result.error });
+        }
 
         if (result.changes > 0) {
             const receiverSocket = Array.from(users.values()).find(u => u.id === friendId);
@@ -837,7 +851,7 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
 
         res.sendStatus(200);
     } catch (error) {
-        console.error('Friend request error:', error);
+        console.error('Friend request error:', error.message, error.stack);
         res.status(500).json({ error: 'Failed to send friend request' });
     }
 });
