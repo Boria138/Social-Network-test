@@ -277,7 +277,31 @@ window.I18N = {
     "theme.oceanBlue": "Ocean Blue",
     "theme.coffeeBrown": "Coffee Brown",
     "theme.customColor": "Custom Color:",
-    "theme.glassEffect": "Glass Effect:"
+    "theme.glassEffect": "Glass Effect:",
+
+    // Call related translations
+    "call.voiceChannel": "Voice Channel",
+    "call.you": "You",
+    "call.isCalling": "is calling you...",
+    "call.accept": "Accept",
+    "call.decline": "Decline",
+    "call.toggleVideo": "Toggle Video",
+    "call.toggleAudio": "Toggle Audio",
+    "call.toggleScreen": "Share Screen",
+
+    // Settings related translations
+    "settings.title": "Settings",
+    "settings.privacy": "Privacy & Content",
+    "settings.linkPreview": "Link Previews",
+    "settings.linkPreviewDesc": "Show preview cards for links in messages",
+    "settings.clearHiddenPreviews": "Clear Hidden Previews",
+    "settings.account": "Account",
+    "settings.logout": "Logout",
+
+    // Additional action translations
+    "actions.notifications": "Notifications",
+    "actions.menu": "Menu",
+    "actions.send": "Send"
   },
 
   ru: {
@@ -333,6 +357,30 @@ window.I18N = {
     "theme.oceanBlue": "Океанская синяя",
     "theme.coffeeBrown": "Кофейная коричневая",
     "theme.customColor": "Пользовательский цвет:",
-    "theme.glassEffect": "Эффект стекла:"
+    "theme.glassEffect": "Эффект стекла:",
+
+    // Call related translations
+    "call.voiceChannel": "Голосовой канал",
+    "call.you": "Вы",
+    "call.isCalling": "звонит вам...",
+    "call.accept": "Принять",
+    "call.decline": "Отклонить",
+    "call.toggleVideo": "Включить/выключить видео",
+    "call.toggleAudio": "Включить/выключить аудио",
+    "call.toggleScreen": "Поделиться экраном",
+
+    // Settings related translations
+    "settings.title": "Настройки",
+    "settings.privacy": "Приватность и контент",
+    "settings.linkPreview": "Предпросмотр ссылок",
+    "settings.linkPreviewDesc": "Показывать карточки предпросмотра для ссылок в сообщениях",
+    "settings.clearHiddenPreviews": "Очистить скрытые предпросмотры",
+    "settings.account": "Аккаунт",
+    "settings.logout": "Выйти",
+
+    // Additional action translations
+    "actions.notifications": "Уведомления",
+    "actions.menu": "Меню",
+    "actions.send": "Отправить"
   }
 };
