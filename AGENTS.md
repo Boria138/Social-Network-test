@@ -692,6 +692,36 @@ try {
 
 ## Code Style
 
+### Theme & Styling Rules
+
+**CRITICAL:** All UI elements MUST respect the user's selected theme and accent color.
+
+| Element | Required | Forbidden |
+|---------|----------|-----------|
+| Colors | Use CSS variables (`var(--accent)`, `var(--bg)`, etc.) | Hardcoded hex/rgb values |
+| Waveform/Visualizations | Use theme variables | Fixed colors (e.g., Discord blue `#5865F2`) |
+| Backgrounds | Use theme variables | Hardcoded background colors |
+| Text colors | Use theme variables | Fixed color values |
+
+```javascript
+// ALWAYS: Use theme CSS variables
+bar.style.backgroundColor = 'var(--accent)';
+progress.style.background = 'linear-gradient(90deg, var(--accent-transparent) 0%, var(--accentB-transparent) 100%)';
+
+// NEVER: Hardcode colors
+bar.style.backgroundColor = '#5865F2'; // Bad - Discord blue
+progress.style.background = 'linear-gradient(90deg, rgba(88, 101, 242, 0.6) 0%, rgba(88, 101, 242, 0.3) 100%)'; // Bad
+```
+
+**Available Theme Variables:**
+- `--accent` — Primary accent color
+- `--accentB` — Secondary accent color (lighter variant)
+- `--accent-transparent` — Transparent accent (opacity ~0.26)
+- `--accentB-transparent` — Transparent secondary accent
+- `--bg`, `--bg-rgb` — Background color
+- `--fg` — Foreground/text color
+- `--glass` — Glass/panel background
+
 ### Imports
 ```javascript
 // Standard library

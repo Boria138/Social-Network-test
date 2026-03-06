@@ -2369,27 +2369,70 @@ function addMessageToUI(message) {
     if (message.isVoiceMessage && message.file) {
         const voiceContainer = document.createElement('div');
         voiceContainer.className = 'voice-message-container';
-        
-        // Create waveform visualization container
+
+        // Create waveform visualization container with progress overlay
         const waveformContainer = document.createElement('div');
         waveformContainer.className = 'voice-waveform';
-        waveformContainer.style.display = 'flex';
-        waveformContainer.style.alignItems = 'center';
-        waveformContainer.style.gap = '2px';
+        waveformContainer.style.position = 'relative';
+        waveformContainer.style.height = '40px';
         waveformContainer.style.margin = '8px 0';
         waveformContainer.style.padding = '4px';
         waveformContainer.style.background = 'var(--glass)';
         waveformContainer.style.borderRadius = '10px';
+        waveformContainer.style.cursor = 'pointer';
+        waveformContainer.title = 'Click to seek';
+
+        // Create waveform bars container
+        const waveformBars = document.createElement('div');
+        waveformBars.className = 'voice-waveform-bars';
+        waveformBars.style.display = 'flex';
+        waveformBars.style.alignItems = 'center';
+        waveformBars.style.justifyContent = 'space-between';
+        waveformBars.style.height = '100%';
+        waveformBars.style.position = 'relative';
+        waveformBars.style.zIndex = '1';
+        waveformBars.style.width = '100%';
+        waveformBars.style.padding = '0 4px';
+
+        // Create progress overlay
+        const waveformProgress = document.createElement('div');
+        waveformProgress.className = 'voice-waveform-progress';
+        waveformProgress.style.position = 'absolute';
+        waveformProgress.style.left = '0';
+        waveformProgress.style.top = '0';
+        waveformProgress.style.height = '100%';
+        waveformProgress.style.width = '0%';
+        waveformProgress.style.background = 'linear-gradient(90deg, var(--accent-transparent) 0%, var(--accentB-transparent) 100%)';
+        waveformProgress.style.borderRadius = '10px';
+        waveformProgress.style.zIndex = '2';
+        waveformProgress.style.pointerEvents = 'none';
+        waveformProgress.style.transition = 'width 0.1s linear';
+        waveformProgress.style.boxShadow = 'inset 0 0 10px var(--accent-transparent)';
+
+        // Generate waveform bars with varying heights for visual interest
+        const barHeights = [];
+        const totalBars = 60; // More bars for better resolution
         
-        // Generate simple waveform bars
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < totalBars; i++) {
+            // Create varied but smooth height pattern using multiple sine waves
+            const baseHeight = Math.sin(i * 0.2) * 8 + Math.cos(i * 0.4) * 6 + Math.sin(i * 0.7) * 4;
+            const variation = (Math.random() - 0.5) * 8;
+            const height = Math.max(8, Math.min(32, 16 + baseHeight + variation));
+            barHeights.push(height);
+            
             const bar = document.createElement('div');
-            bar.style.width = '3px';
-            bar.style.height = `${Math.random() * 12 + 6}px`;
+            bar.style.width = '2px';
+            bar.style.height = `${height * 0.4}px`; // Start at 40% height
             bar.style.backgroundColor = 'var(--accent)';
             bar.style.borderRadius = '2px';
-            waveformContainer.appendChild(bar);
+            bar.style.flexShrink = '0';
+            bar.style.transition = 'height 0.15s ease, opacity 0.15s ease, background-color 0.15s ease';
+            bar.style.opacity = '0.4';
+            waveformBars.appendChild(bar);
         }
+
+        waveformContainer.appendChild(waveformBars);
+        waveformContainer.appendChild(waveformProgress);
         
         // Create audio player with speed controls
         const audio = document.createElement('audio');
@@ -2397,7 +2440,7 @@ function addMessageToUI(message) {
         audio.className = 'voice-player';
         audio.style.width = '100%';
         audio.style.margin = '8px 0';
-        
+
         // Create custom controls container
         const controlsContainer = document.createElement('div');
         controlsContainer.className = 'voice-controls';
@@ -2405,11 +2448,11 @@ function addMessageToUI(message) {
         controlsContainer.style.alignItems = 'center';
         controlsContainer.style.gap = '10px';
         controlsContainer.style.marginTop = '8px';
-        
-        // Play/Pause button
+
+        // Play/Pause button with SVG icons
         const playBtn = document.createElement('button');
         playBtn.className = 'voice-play-btn';
-        playBtn.innerHTML = '▶';
+        playBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
         playBtn.style.background = 'var(--accent)';
         playBtn.style.border = 'none';
         playBtn.style.borderRadius = '50%';
@@ -2421,7 +2464,7 @@ function addMessageToUI(message) {
         playBtn.style.cursor = 'pointer';
         playBtn.style.color = 'white';
         playBtn.style.flexShrink = '0';
-        
+
         // Speed control
         const speedBtn = document.createElement('button');
         speedBtn.className = 'voice-speed-btn';
@@ -2456,32 +2499,44 @@ function addMessageToUI(message) {
         transcribeBtn.style.display = 'flex';
         transcribeBtn.style.alignItems = 'center';
         transcribeBtn.style.gap = '6px';
-        
-        // Duration display
+
+        // Duration display (in controls container)
         const durationDisplay = document.createElement('span');
         durationDisplay.className = 'voice-duration';
         durationDisplay.textContent = '0:00';
         durationDisplay.style.color = 'var(--muted)';
         durationDisplay.style.fontSize = '13px';
         durationDisplay.style.marginLeft = 'auto';
-        
+        durationDisplay.style.minWidth = '40px';
+        durationDisplay.style.textAlign = 'right';
+
         // Add event listeners
         let isPlaying = false;
+        let totalDuration = null;
+        
+        // SVG icons for play/pause
+        const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        const pauseIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+        
+        // Play/Pause toggle with lock during playback
         playBtn.addEventListener('click', () => {
             if (isPlaying) {
                 audio.pause();
-                playBtn.innerHTML = '▶';
+                playBtn.innerHTML = playIcon;
+                playBtn.style.opacity = '1';
             } else {
                 audio.play();
-                playBtn.innerHTML = '⏸';
+                playBtn.innerHTML = pauseIcon;
+                playBtn.style.opacity = '0.7';
             }
             isPlaying = !isPlaying;
         });
-        
+
+        // Speed control
         let currentSpeed = 1;
         const speeds = [0.5, 1, 1.25, 1.5, 2];
         let speedIndex = 1; // Default to 1x
-        
+
         speedBtn.addEventListener('click', () => {
             speedIndex = (speedIndex + 1) % speeds.length;
             currentSpeed = speeds[speedIndex];
@@ -2574,37 +2629,119 @@ function addMessageToUI(message) {
                 transcribeBtn.classList.remove('transcribing');
             }
         });
-        
-        // Update duration when metadata is loaded
+
+        // Update duration when metadata is loaded - show total duration
         audio.addEventListener('loadedmetadata', () => {
-            const minutes = Math.floor(audio.duration / 60);
-            const seconds = Math.floor(audio.duration % 60);
+            totalDuration = audio.duration;
+            const minutes = Math.floor(totalDuration / 60);
+            const seconds = Math.floor(totalDuration % 60);
             durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            durationDisplay.style.color = 'var(--muted)';
         });
-        
-        // Also try to update duration when audio can play through
-        audio.addEventListener('canplaythrough', () => {
-            if (audio.duration && !isNaN(audio.duration)) {
-                const minutes = Math.floor(audio.duration / 60);
-                const seconds = Math.floor(audio.duration % 60);
-                durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+        // Update progress bar and waveform during playback
+        audio.addEventListener('timeupdate', () => {
+            const currentTime = audio.currentTime;
+            const duration = audio.duration;
+
+            // Update progress bar
+            if (duration > 0) {
+                const progressPercent = (currentTime / duration) * 100;
+                waveformProgress.style.width = `${progressPercent}%`;
+
+                // Show remaining time during playback
+                const remainingTime = duration - currentTime;
+                const remainingMinutes = Math.floor(remainingTime / 60);
+                const remainingSeconds = Math.floor(remainingTime % 60);
+                durationDisplay.textContent = `-${remainingMinutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+                durationDisplay.style.color = 'var(--accent)';
+
+                // Update waveform bars to show progress dynamically
+                const bars = waveformBars.querySelectorAll('div');
+                const totalBars = bars.length;
+                const currentBar = Math.floor((currentTime / duration) * totalBars);
+
+                bars.forEach((bar, index) => {
+                    if (index < currentBar) {
+                        // Played bars: full height, bright accent color
+                        bar.style.height = `${barHeights[index]}px`;
+                        bar.style.backgroundColor = 'var(--accent)';
+                        bar.style.opacity = '1';
+                        bar.style.boxShadow = '0 0 4px var(--accent-transparent)';
+                    } else if (index === currentBar) {
+                        // Current bar: pulsing effect
+                        const pulse = Math.sin(Date.now() * 0.015) * 0.4 + 0.6;
+                        bar.style.height = `${barHeights[index]}px`;
+                        bar.style.backgroundColor = 'var(--accent)';
+                        bar.style.opacity = pulse;
+                        bar.style.boxShadow = '0 0 6px var(--accent-transparent)';
+                    } else {
+                        // Unplayed bars: minimum height, dimmed
+                        bar.style.height = `${barHeights[index] * 0.3}px`;
+                        bar.style.backgroundColor = 'var(--muted)';
+                        bar.style.opacity = '0.25';
+                        bar.style.boxShadow = 'none';
+                    }
+                });
             }
         });
-        
-        // Set duration to 'Loading...' initially
-        durationDisplay.textContent = '...';
-        
-        // Try to set duration immediately if audio is already loaded
-        if (audio.readyState >= 1 && audio.duration) {
-            const minutes = Math.floor(audio.duration / 60);
-            const seconds = Math.floor(audio.duration % 60);
-            durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }
-        
-        // Update play button when audio ends
+
+        // Reset duration display when audio ends
         audio.addEventListener('ended', () => {
-            playBtn.innerHTML = '▶';
+            playBtn.innerHTML = playIcon;
+            playBtn.style.opacity = '1';
             isPlaying = false;
+
+            // Reset progress
+            waveformProgress.style.width = '0%';
+
+            // Reset duration display to total
+            if (totalDuration) {
+                const minutes = Math.floor(totalDuration / 60);
+                const seconds = Math.floor(totalDuration % 60);
+                durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                durationDisplay.style.color = 'var(--muted)';
+            }
+
+            // Reset waveform bars
+            const bars = waveformBars.querySelectorAll('div');
+            bars.forEach((bar, index) => {
+                bar.style.height = `${barHeights[index] * 0.3}px`;
+                bar.style.backgroundColor = 'var(--muted)';
+                bar.style.opacity = '0.25';
+                bar.style.boxShadow = 'none';
+            });
+        });
+
+        // Reset duration display when audio pauses
+        audio.addEventListener('pause', () => {
+            if (totalDuration) {
+                const minutes = Math.floor(totalDuration / 60);
+                const seconds = Math.floor(totalDuration % 60);
+                durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                durationDisplay.style.color = 'var(--muted)';
+            }
+        });
+
+        // Click on waveform to seek
+        waveformContainer.addEventListener('click', (e) => {
+            const rect = waveformContainer.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const width = rect.width;
+            const duration = audio.duration;
+
+            if (duration > 0) {
+                const seekTime = (clickX / width) * duration;
+                audio.currentTime = seekTime;
+
+                // If not playing, start playing
+                if (!isPlaying) {
+                    audio.play();
+                    playBtn.innerHTML = pauseIcon;
+                    playBtn.style.opacity = '0.7';
+                    isPlaying = true;
+                }
+            }
         });
         
         // Store the audio element in a global array to prevent garbage collection
@@ -2612,20 +2749,75 @@ function addMessageToUI(message) {
             window.voiceMessageElements = [];
         }
         // Store references to the elements for later restoration
-        window.voiceMessageElements.push({ audio, playBtn, speedBtn, durationDisplay, transcribeBtn });
+        window.voiceMessageElements.push({
+            audio,
+            playBtn,
+            speedBtn,
+            durationDisplay,
+            waveformProgress,
+            waveformBars,
+            waveformContainer,
+            transcribeBtn
+        });
+
+        // Animation for played bars - gentle wave motion
+        let animationFrameId = null;
+        let animationTime = 0;
+
+        function animateWaveform() {
+            if (!audio.paused && !audio.ended) {
+                animationTime += 0.15;
+                const bars = waveformBars.querySelectorAll('div');
+                const totalBars = bars.length;
+                const currentBar = Math.floor((audio.currentTime / audio.duration) * totalBars);
+
+                bars.forEach((bar, index) => {
+                    if (index < currentBar) {
+                        // Played bars: animated wave motion
+                        const waveOffset = Math.sin(animationTime + index * 0.3) * 4;
+                        const baseHeight = barHeights[index];
+                        bar.style.height = `${Math.max(12, baseHeight + waveOffset)}px`;
+                    }
+                });
+
+                animationFrameId = requestAnimationFrame(animateWaveform);
+            }
+        }
+
+        // Start animation when audio plays
+        audio.addEventListener('play', () => {
+            if (!animationFrameId) {
+                animateWaveform();
+            }
+        });
+
+        // Stop animation when audio pauses/ends
+        audio.addEventListener('pause', () => {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        });
+
+        audio.addEventListener('ended', () => {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        });
 
         // Add elements to containers
         controlsContainer.appendChild(playBtn);
         controlsContainer.appendChild(speedBtn);
         controlsContainer.appendChild(transcribeBtn);
         controlsContainer.appendChild(durationDisplay);
-        
+
         voiceContainer.appendChild(waveformContainer);
         voiceContainer.appendChild(audio);
         voiceContainer.appendChild(controlsContainer);
-        
+
         content.appendChild(voiceContainer);
-    } 
+    }
     // If the message contains a file (but not a voice message), add it to the message
     else if (message.file) {
         const fileDiv = document.createElement('div');
@@ -6522,51 +6714,57 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 function restoreVoiceMessageHandlers() {
     if (window.voiceMessageElements) {
         window.voiceMessageElements.forEach(item => {
-            const { audio, playBtn, speedBtn, durationDisplay } = item;
-            
+            const { audio, playBtn, speedBtn, durationDisplay, waveformProgress, waveformBars, waveformContainer } = item;
+
             if (audio && playBtn && speedBtn && durationDisplay) {
                 // Проверяем, что элементы все еще находятся в DOM
                 if (document.contains(audio) && document.contains(playBtn)) {
+                    // SVG icons for play/pause
+                    const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+                    const pauseIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+
                     // Удаляем старые обработчики
                     const newPlayBtn = playBtn.cloneNode(true);
-                    
-                    // Восстанавливаем обработчики
+
+                    // Восстанавливаем обработчики с блокировкой повторного запуска
                     let isPlaying = false;
                     newPlayBtn.addEventListener('click', () => {
                         if (isPlaying) {
                             audio.pause();
-                            newPlayBtn.innerHTML = '▶';
+                            newPlayBtn.innerHTML = playIcon;
+                            newPlayBtn.style.opacity = '1';
                         } else {
                             audio.play();
-                            newPlayBtn.innerHTML = '⏸';
+                            newPlayBtn.innerHTML = pauseIcon;
+                            newPlayBtn.style.opacity = '0.7';
                         }
                         isPlaying = !isPlaying;
                     });
-                    
+
                     // Заменяем старую кнопку на новую с обработчиками
                     if (playBtn.parentNode) {
                         playBtn.parentNode.replaceChild(newPlayBtn, playBtn);
                     }
-                    
+
                     // Восстанавливаем обработчик скорости
                     const newSpeedBtn = speedBtn.cloneNode(true);
-                    
+
                     let currentSpeed = 1;
                     const speeds = [0.5, 1, 1.25, 1.5, 2];
                     let speedIndex = 1; // Default to 1x
-                    
+
                     newSpeedBtn.addEventListener('click', () => {
                         speedIndex = (speedIndex + 1) % speeds.length;
                         currentSpeed = speeds[speedIndex];
                         audio.playbackRate = currentSpeed;
                         newSpeedBtn.textContent = `${currentSpeed}x`;
                     });
-                    
+
                     // Заменяем старую кнопку скорости на новую
                     if (speedBtn.parentNode) {
                         speedBtn.parentNode.replaceChild(newSpeedBtn, speedBtn);
                     }
-                    
+
                     // Обновляем длительность при загрузке метаданных
                     if (audio.readyState >= 1) {
                         // Если аудио уже загружено, обновляем длительность
