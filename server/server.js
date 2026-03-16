@@ -10,6 +10,7 @@ const bcrypt = require('bcrypt');
 const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const { JSDOM } = require('jsdom');
 
 const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, channelDB, sessionDB, notificationDB } = require('./database');
@@ -44,6 +45,54 @@ const io = socketIO(server, {
 });
 
 const PORT = process.env.PORT || 3000;
+
+/**
+ * Convert voice upload to a unified MP3 format for cross-browser consistency.
+ * @param {string} inputPath - Source file path.
+ * @returns {Promise<{ path: string, filename: string, mimetype: string, size: number }>}
+ */
+function normalizeVoiceUpload(inputPath) {
+    return new Promise((resolve, reject) => {
+        const parsedPath = path.parse(inputPath);
+        const outputPath = path.join(parsedPath.dir, `${parsedPath.name}.mp3`);
+        const voiceSampleRate = process.env.VOICE_SAMPLE_RATE || '32000';
+        const voiceBitrate = process.env.VOICE_AUDIO_BITRATE || '64k';
+        const ffmpeg = spawn('ffmpeg', [
+            '-y',
+            '-i', inputPath,
+            '-ac', '1',
+            '-ar', voiceSampleRate,
+            '-c:a', 'libmp3lame',
+            '-b:a', voiceBitrate,
+            outputPath
+        ]);
+
+        let ffmpegError = '';
+        ffmpeg.stderr.on('data', (data) => {
+            ffmpegError += data.toString();
+        });
+
+        ffmpeg.on('error', (error) => {
+            reject(error);
+        });
+
+        ffmpeg.on('close', (code) => {
+            if (code !== 0) {
+                return reject(new Error(ffmpegError || `FFmpeg exited with code ${code}`));
+            }
+            fs.promises.stat(outputPath)
+                .then((stats) => {
+                    resolve({
+                        path: outputPath,
+                        filename: path.basename(outputPath),
+                        mimetype: 'audio/mpeg',
+                        size: stats.size
+                    });
+                })
+                .catch(reject);
+        });
+    });
+}
 
 // Generate random token
 function generateToken() {
@@ -402,13 +451,33 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
         }
 
         const { dmId, senderId } = req.body;
+        const isVoiceMessage = req.body.isVoiceMessage === 'true';
+        let fileForStorage = req.file;
+
+        if (isVoiceMessage) {
+            try {
+                const normalizedFile = await normalizeVoiceUpload(req.file.path);
+                await fs.promises.unlink(req.file.path);
+                fileForStorage = {
+                    ...req.file,
+                    filename: normalizedFile.filename,
+                    path: normalizedFile.path,
+                    mimetype: normalizedFile.mimetype,
+                    size: normalizedFile.size,
+                    originalname: path.parse(req.file.originalname).name + '.mp3'
+                };
+            } catch (normalizeError) {
+                console.warn('Voice normalization failed, using original upload:', normalizeError.message);
+            }
+        }
+
         // Сохраняем файл с ID отправителя и получателя, но без связи с конкретным сообщением
         // Мы будем связывать файл с сообщением позже, когда сообщение будет создано
         const fileRecord = await fileDB.create(
-            req.file.filename,
-            req.file.path,
-            req.file.mimetype,
-            req.file.size,
+            fileForStorage.filename,
+            fileForStorage.path,
+            fileForStorage.mimetype,
+            fileForStorage.size,
             req.user.id,
             null  // Пока не знаем ID сообщения
         );
@@ -418,10 +487,10 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
 
         res.json({
             id: fileRecord.id,
-            filename: req.file.originalname,
-            url: `/uploads/${req.file.filename}`,
-            type: req.file.mimetype,
-            size: req.file.size
+            filename: fileForStorage.originalname,
+            url: `/uploads/${fileForStorage.filename}`,
+            type: fileForStorage.mimetype,
+            size: fileForStorage.size
         });
     } catch (error) {
         console.error('Upload error:', error);
