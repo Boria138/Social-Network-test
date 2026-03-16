@@ -829,6 +829,25 @@ async function loadNewsFromFile() {
     }
 }
 
+async function loadNewsReactionsFromServer(newsIds) {
+    if (!Array.isArray(newsIds) || newsIds.length === 0) {
+        return {};
+    }
+
+    try {
+        const response = await fetch(`${getApiUrl()}/api/news/reactions?ids=${encodeURIComponent(newsIds.join(','))}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) {
+            return {};
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error loading news reactions:', error);
+        return {};
+    }
+}
+
 // Преобразование новости в сообщение канала
 function newsToChannelMessage(news) {
     const title = news.title || `Версия ${news.version}`;
@@ -953,6 +972,13 @@ async function loadSystemChannelMessages() {
         // Загружаем новости из файла
         const news = await loadNewsFromFile();
         console.log('News loaded:', news.length);
+        const newsIds = news.map(item => `news-${item.id}`);
+        const newsReactionsMap = await loadNewsReactionsFromServer(newsIds);
+        const newsMessages = news.map(item => {
+            const message = newsToChannelMessage(item);
+            message.reactions = newsReactionsMap[message.id] || [];
+            return message;
+        });
         
         // Загружаем сообщения из API (если есть)
         let apiMessages = [];
@@ -969,7 +995,7 @@ async function loadSystemChannelMessages() {
         }
         
         // Объединяем и сортируем по дате
-        const allMessages = [...news.map(newsToChannelMessage), ...apiMessages].sort((a, b) => 
+        const allMessages = [...newsMessages, ...apiMessages].sort((a, b) => 
             new Date(a.created_at) - new Date(b.created_at)
         );
         
@@ -1001,7 +1027,8 @@ function addNewsMessageToUI(message) {
     });
 
     // Форматируем текст с Markdown используя готовую функцию
-    let formattedText = formatQuotedText(message.content);
+    const formattedText = formatQuotedText(message.content);
+    const reactions = Array.isArray(message.reactions) ? message.reactions : [];
 
     const div = document.createElement('div');
     div.className = 'message news-message';
@@ -1016,10 +1043,34 @@ function addNewsMessageToUI(message) {
             <div class="message-text" style="line-height: 1.6;">
                 ${formattedText}
             </div>
+            <div class="reactions-and-actions-container">
+                <div class="message-reactions"></div>
+                <div class="message-actions">
+                    <button class="add-reaction-btn" title="Add reaction">😊</button>
+                </div>
+            </div>
         </div>
     `;
 
     messagesContainer.appendChild(div);
+
+    const reactionsContainer = div.querySelector('.message-reactions');
+    const addReactionBtn = div.querySelector('.add-reaction-btn');
+    reactions.forEach(reaction => {
+        const reactionEl = document.createElement('div');
+        reactionEl.className = 'reaction';
+        reactionEl.innerHTML = `${reaction.emoji} <span>${reaction.count}</span>`;
+        reactionEl.title = reaction.users;
+        reactionEl.addEventListener('click', () => {
+            if (socket && socket.connected) {
+                socket.emit('remove-reaction', { messageId: message.id, emoji: reaction.emoji });
+            }
+        });
+        reactionsContainer.appendChild(reactionEl);
+    });
+    if (addReactionBtn) {
+        addReactionBtn.onclick = () => showEmojiPickerForMessage(message.id);
+    }
     
     // Применяем Twemoji к сообщению
     if (typeof twemoji !== 'undefined') {
@@ -4789,6 +4840,13 @@ function createFullEmojiPicker(onSelect) {
 }
 
 function addReaction(messageId, emoji) {
+    if (String(messageId).startsWith('news-')) {
+        if (socket && socket.connected) {
+            socket.emit('add-reaction', { messageId, emoji });
+        }
+        return;
+    }
+
     // Если это Self Chat, обрабатываем локально
     if (currentDMUserId === currentUser.id) {
         addSelfChatReaction(messageId, emoji);
@@ -4808,6 +4866,16 @@ function updateMessageReactions(messageId, reactions) {
         reactionEl.className = 'reaction';
         reactionEl.innerHTML = `${reaction.emoji} <span>${reaction.count}</span>`;
         reactionEl.title = reaction.users;
+
+        if (String(messageId).startsWith('news-')) {
+            reactionEl.addEventListener('click', () => {
+                if (socket && socket.connected) {
+                    socket.emit('remove-reaction', { messageId, emoji: reaction.emoji });
+                }
+            });
+            reactionsContainer.appendChild(reactionEl);
+            return;
+        }
 
         // Для Self Chat обработка реакций будет отличаться
         if (currentDMUserId === currentUser.id) {

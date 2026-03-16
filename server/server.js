@@ -12,7 +12,7 @@ const cors = require('cors');
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
 
-const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, friendDB, serverDB, channelDB, sessionDB, notificationDB } = require('./database');
+const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, newsReactionDB, friendDB, serverDB, channelDB, sessionDB, notificationDB } = require('./database');
 const { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS } = require('./config');
 
 const app = express();
@@ -806,6 +806,38 @@ app.get('/api/channels/system', authenticateToken, async (req, res) => {
     }
 });
 
+app.get('/api/news/reactions', authenticateToken, async (req, res) => {
+    try {
+        const rawIds = typeof req.query.ids === 'string' ? req.query.ids : '';
+        const newsIds = rawIds
+            .split(',')
+            .map(id => id.trim())
+            .filter(id => id.startsWith('news-'));
+
+        if (newsIds.length === 0) {
+            return res.json({});
+        }
+
+        const grouped = {};
+        const rows = await newsReactionDB.getByNewsIds(newsIds);
+        rows.forEach(row => {
+            if (!grouped[row.news_id]) {
+                grouped[row.news_id] = [];
+            }
+            grouped[row.news_id].push({
+                emoji: row.emoji,
+                count: row.count,
+                users: row.users
+            });
+        });
+
+        res.json(grouped);
+    } catch (error) {
+        console.error('Get news reactions error:', error);
+        res.status(500).json({ error: 'Failed to get news reactions' });
+    }
+});
+
 app.get('/api/friends', authenticateToken, async (req, res) => {
     try {
         const friends = await friendDB.getFriends(req.user.id);
@@ -1192,8 +1224,14 @@ io.on('connection', async (socket) => {
     socket.on('add-reaction', async (data) => {
         try {
             const { messageId, emoji } = data;
-            await reactionDB.add(emoji, messageId, socket.userId);
+            if (typeof messageId === 'string' && messageId.startsWith('news-')) {
+                await newsReactionDB.add(emoji, messageId, socket.userId);
+                const reactions = await newsReactionDB.getByNewsId(messageId);
+                io.emit('reaction-update', { messageId, reactions });
+                return;
+            }
 
+            await reactionDB.add(emoji, messageId, socket.userId);
             const reactions = await reactionDB.getByMessage(messageId);
             io.emit('reaction-update', { messageId, reactions });
         } catch (error) {
@@ -1204,8 +1242,14 @@ io.on('connection', async (socket) => {
     socket.on('remove-reaction', async (data) => {
         try {
             const { messageId, emoji } = data;
-            await reactionDB.remove(emoji, messageId, socket.userId);
+            if (typeof messageId === 'string' && messageId.startsWith('news-')) {
+                await newsReactionDB.remove(emoji, messageId, socket.userId);
+                const reactions = await newsReactionDB.getByNewsId(messageId);
+                io.emit('reaction-update', { messageId, reactions });
+                return;
+            }
 
+            await reactionDB.remove(emoji, messageId, socket.userId);
             const reactions = await reactionDB.getByMessage(messageId);
             io.emit('reaction-update', { messageId, reactions });
         } catch (error) {

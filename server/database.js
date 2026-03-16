@@ -87,6 +87,18 @@ function initializeDatabase() {
         )
     `);
 
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS news_reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_id TEXT NOT NULL,
+            emoji TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE(news_id, user_id, emoji)
+        )
+    `);
+
     // Server members table
     db.exec(`
         CREATE TABLE IF NOT EXISTS server_members (
@@ -712,6 +724,46 @@ const reactionDB = {
     }
 };
 
+const newsReactionDB = {
+    add: (emoji, newsId, userId) => {
+        const stmt = db.prepare('INSERT OR IGNORE INTO news_reactions (news_id, emoji, user_id) VALUES (?, ?, ?)');
+        const result = stmt.run(newsId, emoji, userId);
+        return Promise.resolve({ id: result.lastInsertRowid, newsId, emoji, userId });
+    },
+
+    remove: (emoji, newsId, userId) => {
+        const stmt = db.prepare('DELETE FROM news_reactions WHERE emoji = ? AND news_id = ? AND user_id = ?');
+        stmt.run(emoji, newsId, userId);
+        return Promise.resolve();
+    },
+
+    getByNewsId: (newsId) => {
+        const stmt = db.prepare(`
+            SELECT nr.emoji, COUNT(*) as count, GROUP_CONCAT(u.username) as users
+            FROM news_reactions nr
+            JOIN users u ON nr.user_id = u.id
+            WHERE nr.news_id = ?
+            GROUP BY nr.emoji
+        `);
+        return Promise.resolve(stmt.all(newsId));
+    },
+
+    getByNewsIds: (newsIds) => {
+        if (!Array.isArray(newsIds) || newsIds.length === 0) {
+            return Promise.resolve([]);
+        }
+        const placeholders = newsIds.map(() => '?').join(',');
+        const stmt = db.prepare(`
+            SELECT nr.news_id, nr.emoji, COUNT(*) as count, GROUP_CONCAT(u.username) as users
+            FROM news_reactions nr
+            JOIN users u ON nr.user_id = u.id
+            WHERE nr.news_id IN (${placeholders})
+            GROUP BY nr.news_id, nr.emoji
+        `);
+        return Promise.resolve(stmt.all(...newsIds));
+    }
+};
+
 // Friend operations
 const friendDB = {
     sendRequest: (userId, friendId) => {
@@ -1101,6 +1153,7 @@ module.exports = {
     dmDB,
     fileDB,
     reactionDB,
+    newsReactionDB,
     friendDB,
     serverDB,
     channelDB,
