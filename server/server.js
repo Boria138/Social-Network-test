@@ -712,6 +712,8 @@ app.post('/api/dm/:userId', authenticateToken, async (req, res) => {
             reactions: [],
             file: null,
             edited: false,
+            pinned: false,
+            pinnedAt: null,
             replyTo: null
         };
 
@@ -728,6 +730,8 @@ app.post('/api/dm/:userId', authenticateToken, async (req, res) => {
                     timestamp: timestamp,
                     reactions: [],
                     file: null,
+                    pinned: false,
+                    pinnedAt: null,
                     replyTo: null
                 }
             });
@@ -1068,6 +1072,8 @@ io.on('connection', async (socket) => {
                 timestamp: message.timestamp,
                 reactions: reactions,
                 file: message.file,  // Добавляем информацию о файле, если она есть
+                pinned: false,
+                pinnedAt: null,
                 replyTo: replyToPayload  // Добавляем информацию об ответе
             };
 
@@ -1117,6 +1123,8 @@ io.on('connection', async (socket) => {
                 reactions: reactions,
                 edited: true,  // Помечаем, что сообщение было отредактировано
                 originalContent: updatedMessage.originalContent,  // Добавляем оригинальное содержимое
+                pinned: Boolean(updatedMessage.is_pinned),
+                pinnedAt: updatedMessage.pinned_at || null,
                 replyTo: updatedMessage.reply_to_id ? {
                     id: updatedMessage.reply_to_id,
                     author: updatedMessage.reply_to_author,
@@ -1202,6 +1210,45 @@ io.on('connection', async (socket) => {
             io.emit('reaction-update', { messageId, reactions });
         } catch (error) {
             console.error('Reaction error:', error);
+        }
+    });
+
+    socket.on('toggle-dm-pin', async (data) => {
+        try {
+            const messageId = Number(data?.messageId);
+            if (!Number.isInteger(messageId) || messageId <= 0) {
+                return;
+            }
+
+            const message = await dmDB.findById(messageId);
+            if (!message) {
+                return;
+            }
+
+            if (message.sender_id !== socket.userId && message.receiver_id !== socket.userId) {
+                return;
+            }
+
+            const pinState = await dmDB.togglePinned(messageId);
+            if (!pinState) {
+                return;
+            }
+
+            const payload = {
+                messageId,
+                pinned: pinState.pinned,
+                pinnedAt: pinState.pinnedAt
+            };
+
+            const otherUserId = message.sender_id === socket.userId ? message.receiver_id : message.sender_id;
+            const otherSocket = Array.from(users.values()).find(u => u.id === otherUserId);
+            if (otherSocket) {
+                io.to(otherSocket.socketId).emit('dm-pin-updated', payload);
+            }
+
+            socket.emit('dm-pin-updated', payload);
+        } catch (error) {
+            console.error('Toggle DM pin error:', error);
         }
     });
 
@@ -1637,6 +1684,55 @@ app.delete('/api/dm/:messageId', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Delete message error:', error);
         res.status(500).json({ error: 'Failed to delete message' });
+    }
+});
+
+// Toggle pin message
+app.put('/api/dm/:messageId/pin', authenticateToken, async (req, res) => {
+    try {
+        const messageId = Number(req.params.messageId);
+
+        if (!Number.isInteger(messageId) || messageId <= 0) {
+            return res.status(400).json({ error: 'Invalid message ID' });
+        }
+
+        const message = await dmDB.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+
+        if (message.sender_id !== req.user.id && message.receiver_id !== req.user.id) {
+            return res.status(403).json({ error: 'Not authorized to pin this message' });
+        }
+
+        const hasPinnedValue = Object.prototype.hasOwnProperty.call(req.body || {}, 'pinned');
+        if (!hasPinnedValue) {
+            const pinState = await dmDB.togglePinned(messageId);
+            return res.json({
+                success: true,
+                data: {
+                    messageId,
+                    pinned: pinState.pinned,
+                    pinnedAt: pinState.pinnedAt
+                }
+            });
+        }
+
+        const pinned = Boolean(req.body.pinned);
+        await dmDB.setPinned(messageId, pinned);
+        const updated = await dmDB.findById(messageId);
+
+        res.json({
+            success: true,
+            data: {
+                messageId,
+                pinned,
+                pinnedAt: updated.pinned_at || null
+            }
+        });
+    } catch (error) {
+        console.error('Toggle pin message error:', error);
+        res.status(500).json({ error: 'Failed to toggle message pin' });
     }
 });
 

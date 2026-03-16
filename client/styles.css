@@ -1953,7 +1953,7 @@ body::after{
     margin-right: 4px;
 }
 
-.reply-btn, .forward-btn, .edit-btn, .delete-btn, .add-reaction-btn {
+.reply-btn, .forward-btn, .edit-btn, .delete-btn, .add-reaction-btn, .pin-btn {
     background: none;
     border: 1px solid transparent;
     font-size: 16px;
@@ -1965,9 +1965,66 @@ body::after{
     color: var(--muted);
 }
 
-.reply-btn:hover, .forward-btn:hover, .edit-btn:hover, .delete-btn:hover, .add-reaction-btn:hover {
+.reply-btn:hover, .forward-btn:hover, .edit-btn:hover, .delete-btn:hover, .add-reaction-btn:hover, .pin-btn:hover {
     background: var(--glass);
     color: var(--text);
+}
+
+.pin-btn.active {
+    color: var(--accent);
+    border-color: var(--accent-transparent);
+    background: var(--glass);
+}
+
+.message-pin-indicator {
+    font-size: 12px;
+    color: var(--accent);
+    align-items: center;
+    gap: 4px;
+}
+
+.message-group.pinned-message {
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.pinned-message-banner {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid var(--accent-transparent);
+    background: var(--glass);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    padding: 8px 14px;
+    cursor: pointer;
+}
+
+.pinned-message-banner:hover {
+    background: var(--glass-2);
+}
+
+.pinned-banner-title {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.pinned-banner-counter {
+    color: var(--muted);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.pinned-banner-text {
+    color: var(--text);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 /* Container for reactions and actions */

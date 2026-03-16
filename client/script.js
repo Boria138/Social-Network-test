@@ -27,6 +27,8 @@ let users = new Map();
 let isMobileView = window.innerWidth <= 820;
 // Переменная для отслеживания редактируемого сообщения
 let editingMessageId = null;
+let pinnedMessageIds = [];
+let activePinnedMessageIndex = 0;
 
 // Variables for voice recording
 let isRecording = false;
@@ -404,6 +406,8 @@ function connectToSocketIO() {
                     file: data.message.file,
                     isVoiceMessage: isVoiceMessage,
                     edited: data.message.edited,
+                    pinned: Boolean(data.message.pinned),
+                    pinnedAt: data.message.pinnedAt || null,
                     replyTo: data.message.replyTo || null
                 });
                 scrollToBottom();
@@ -449,6 +453,8 @@ function connectToSocketIO() {
                     file: data.message.file,  // Добавляем информацию о файле, если она есть
                     isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                     edited: data.message.edited,  // Добавляем флаг редактирования, если есть
+                    pinned: Boolean(data.message.pinned),
+                    pinnedAt: data.message.pinnedAt || null,
                     replyTo: data.message.replyTo || null  // Добавляем информацию об ответе
                 });
                 scrollToBottom();
@@ -501,6 +507,12 @@ function connectToSocketIO() {
             // Удаляем сообщение из UI
             if (currentView === 'dm' && currentDMUserId) {
                 deleteMessageFromUI(data.messageId);
+            }
+        });
+
+    socket.on('dm-pin-updated', (data) => {
+            if (currentView === 'dm' && currentDMUserId) {
+                updateMessagePinInUI(data.messageId, data.pinned, data.pinnedAt);
             }
         });
 
@@ -750,6 +762,7 @@ async function openSystemChannel() {
     
     currentView = 'channel';
     currentChannel = { id: systemChannelId, name: 'Новости', type: 'system' };
+    hidePinnedMessageBanner();
     
     const friendsView = document.getElementById('friendsView');
     const chatView = document.getElementById('chatView');
@@ -1869,6 +1882,7 @@ function loadSelfChatHistory() {
     }
 
     messagesContainer.innerHTML = '';
+    ensurePinnedMessagesBlock();
 
     // Получаем историю из localStorage
     const selfChatHistory = JSON.parse(localStorage.getItem(`selfChatHistory_${currentUser.id}`)) || [];
@@ -1890,10 +1904,13 @@ function loadSelfChatHistory() {
             timestamp: message.timestamp,
             reactions: message.reactions || [],
             file: message.file,  // Добавляем информацию о файле, если она есть
-            isVoiceMessage: isVoiceMessage // Определяем, является ли это голосовым сообщением
+            isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
+            pinned: Boolean(message.pinned),
+            pinnedAt: message.pinnedAt || null
         });
     });
 
+    rebuildPinnedMessagesBlock();
     scrollToBottom();
     
     // Restore voice message handlers after loading history
@@ -1918,6 +1935,7 @@ function saveSelfMessageToHistory(message) {
 function showFriendsView() {
     currentView = 'friends';
     currentDMUserId = null;
+    hidePinnedMessageBanner();
 
     const friendsView = document.getElementById('friendsView');
     const chatView = document.getElementById('chatView');
@@ -2283,9 +2301,14 @@ function addMessageToUI(message) {
     }
 
     const messageGroup = document.createElement('div');
+    ensurePinnedMessagesBlock();
 
     messageGroup.className = 'message-group';
     messageGroup.setAttribute('data-message-id', message.id || Date.now());
+    messageGroup.setAttribute('data-pinned', message.pinned ? '1' : '0');
+    if (message.pinned) {
+        messageGroup.classList.add('pinned-message');
+    }
 
     // Проверяем, является ли сообщение отправленным текущим пользователем
     const isUserMessage = Number(message.senderId) === Number(currentUser.id) ||
@@ -2311,6 +2334,11 @@ function addMessageToUI(message) {
     const timestamp = document.createElement('span');
     timestamp.className = 'message-timestamp';
     timestamp.textContent = formatTimestamp(message.timestamp);
+
+    const pinIndicator = document.createElement('span');
+    pinIndicator.className = 'message-pin-indicator';
+    pinIndicator.textContent = '📌 ' + (window.i18n ? window.i18n.t('message.pinned') : 'Pinned');
+    pinIndicator.style.display = message.pinned ? 'inline-flex' : 'none';
 
     const text = document.createElement('div');
     text.className = 'message-text';
@@ -3043,6 +3071,7 @@ function addMessageToUI(message) {
 
     header.appendChild(author);
     header.appendChild(timestamp);
+    header.appendChild(pinIndicator);
     content.appendChild(header);
     content.appendChild(text);
 
@@ -3063,6 +3092,18 @@ function addMessageToUI(message) {
     forwardBtn.textContent = '↗';
     forwardBtn.title = window.i18n ? window.i18n.t('actions.forward') : 'Forward message';
     forwardBtn.onclick = () => forwardMessage(message);
+
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'pin-btn';
+    pinBtn.textContent = '📌';
+    pinBtn.dataset.messageId = String(message.id);
+    pinBtn.title = message.pinned
+        ? (window.i18n ? window.i18n.t('actions.unpin') : 'Unpin message')
+        : (window.i18n ? window.i18n.t('actions.pin') : 'Pin message');
+    if (message.pinned) {
+        pinBtn.classList.add('active');
+    }
+    pinBtn.onclick = () => toggleMessagePin(message.id);
 
     // Create a container for action buttons to position them properly
     const actionsContainer = document.createElement('div');
@@ -3088,6 +3129,7 @@ function addMessageToUI(message) {
 
     actionsContainer.appendChild(replyBtn);
     actionsContainer.appendChild(forwardBtn);
+    actionsContainer.appendChild(pinBtn);
     actionsContainer.appendChild(addReactionBtn);
     reactionsAndActionsContainer.appendChild(actionsContainer);
     content.appendChild(reactionsAndActionsContainer);
@@ -3096,6 +3138,7 @@ function addMessageToUI(message) {
     messageGroup.appendChild(content);
 
     messagesContainer.appendChild(messageGroup);
+    rebuildPinnedMessagesBlock();
 
     if (typeof twemoji !== 'undefined') {
         twemoji.parse(messageGroup);
@@ -3114,6 +3157,150 @@ function addMessageToUI(message) {
     setTimeout(() => {
         restoreVoiceMessageHandlers();
     }, 0);
+}
+
+function ensurePinnedMessagesBlock() {
+    let banner = document.getElementById('pinnedMessageBanner');
+    if (!banner) {
+        const chatView = document.getElementById('chatView');
+        if (!chatView) {
+            return null;
+        }
+        banner = document.createElement('button');
+        banner.type = 'button';
+        banner.id = 'pinnedMessageBanner';
+        banner.className = 'pinned-message-banner';
+        banner.style.display = 'none';
+        banner.innerHTML = `
+            <span class="pinned-banner-title">📌 ${window.i18n ? window.i18n.t('chat.pinnedMessages') : 'Pinned messages'}</span>
+            <span class="pinned-banner-counter">1/1</span>
+            <span class="pinned-banner-text"></span>
+        `;
+
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (messagesContainer) {
+            chatView.insertBefore(banner, messagesContainer);
+        } else {
+            chatView.appendChild(banner);
+        }
+    }
+
+    if (!banner.dataset.bound) {
+        banner.addEventListener('click', () => {
+            rotatePinnedMessageBanner();
+        });
+        banner.dataset.bound = '1';
+    }
+
+    return banner;
+}
+
+function rebuildPinnedMessagesBlock() {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) {
+        return;
+    }
+
+    if (currentView !== 'dm' || !currentDMUserId) {
+        hidePinnedMessageBanner();
+        return;
+    }
+
+    const currentPinnedMessageId = pinnedMessageIds[activePinnedMessageIndex] || null;
+    const pinnedMessages = Array.from(messagesContainer.querySelectorAll('.message-group[data-pinned="1"]'));
+    pinnedMessageIds = pinnedMessages.map(messageEl => messageEl.getAttribute('data-message-id')).filter(Boolean);
+
+    if (!pinnedMessageIds.length) {
+        hidePinnedMessageBanner();
+        return;
+    }
+
+    const existingIndex = currentPinnedMessageId ? pinnedMessageIds.indexOf(currentPinnedMessageId) : -1;
+    activePinnedMessageIndex = existingIndex >= 0 ? existingIndex : 0;
+    renderPinnedMessageBanner();
+}
+
+function hidePinnedMessageBanner() {
+    const banner = document.getElementById('pinnedMessageBanner');
+    if (!banner) {
+        return;
+    }
+
+    banner.style.display = 'none';
+    pinnedMessageIds = [];
+    activePinnedMessageIndex = 0;
+}
+
+function renderPinnedMessageBanner() {
+    const banner = ensurePinnedMessagesBlock();
+    if (!banner || !pinnedMessageIds.length) {
+        hidePinnedMessageBanner();
+        return;
+    }
+
+    const currentId = pinnedMessageIds[activePinnedMessageIndex];
+    const messageElement = currentId ? document.querySelector(`.message-group[data-message-id="${currentId}"]`) : null;
+    if (!messageElement) {
+        rebuildPinnedMessagesBlock();
+        return;
+    }
+
+    const titleEl = banner.querySelector('.pinned-banner-title');
+    const counterEl = banner.querySelector('.pinned-banner-counter');
+    const textEl = banner.querySelector('.pinned-banner-text');
+    if (!titleEl || !counterEl || !textEl) {
+        return;
+    }
+
+    const author = messageElement.querySelector('.message-author')?.textContent || '';
+    const rawText = messageElement.querySelector('.message-text')?.getAttribute('data-raw-text') || '';
+    const preview = rawText.trim() ? rawText.trim() : '📎';
+    const textPrefix = author ? `${author}: ` : '';
+
+    titleEl.textContent = `📌 ${window.i18n ? window.i18n.t('chat.pinnedMessages') : 'Pinned messages'}`;
+    counterEl.textContent = `${activePinnedMessageIndex + 1}/${pinnedMessageIds.length}`;
+    textEl.textContent = `${textPrefix}${preview.slice(0, 120)}`;
+    banner.style.display = 'flex';
+}
+
+function rotatePinnedMessageBanner() {
+    if (!pinnedMessageIds.length) {
+        return;
+    }
+
+    scrollToActivePinnedMessage();
+
+    activePinnedMessageIndex += 1;
+    if (activePinnedMessageIndex >= pinnedMessageIds.length) {
+        activePinnedMessageIndex = 0;
+    }
+
+    renderPinnedMessageBanner();
+}
+
+function scrollToActivePinnedMessage() {
+    if (!pinnedMessageIds.length) {
+        return;
+    }
+
+    const messageId = pinnedMessageIds[activePinnedMessageIndex];
+    if (!messageId) {
+        return;
+    }
+
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) {
+        return;
+    }
+
+    const target = messagesContainer.querySelector(`.message-group[data-message-id="${messageId}"]`);
+    if (!target) {
+        return;
+    }
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('highlighted');
+    setTimeout(() => target.classList.remove('highlighted'), 1600);
 }
 
 function formatTimestamp(date) {
@@ -3414,6 +3601,57 @@ function deleteMessage(messageId) {
     }
 }
 
+function toggleMessagePin(messageId) {
+    if (!messageId) {
+        return;
+    }
+
+    if (currentDMUserId === currentUser.id) {
+        toggleSelfChatMessagePin(messageId);
+        return;
+    }
+
+    if (socket && socket.connected) {
+        socket.emit('toggle-dm-pin', { messageId });
+    }
+}
+
+function updateMessagePinInUI(messageId, pinned, pinnedAt) {
+    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageElement) {
+        return;
+    }
+
+    messageElement.setAttribute('data-pinned', pinned ? '1' : '0');
+    messageElement.classList.toggle('pinned-message', Boolean(pinned));
+
+    const pinIndicator = messageElement.querySelector('.message-pin-indicator');
+    if (pinIndicator) {
+        pinIndicator.style.display = pinned ? 'inline-flex' : 'none';
+    }
+
+    const pinBtn = messageElement.querySelector('.pin-btn');
+    if (pinBtn) {
+        pinBtn.classList.toggle('active', Boolean(pinned));
+        pinBtn.title = pinned
+            ? (window.i18n ? window.i18n.t('actions.unpin') : 'Unpin message')
+            : (window.i18n ? window.i18n.t('actions.pin') : 'Pin message');
+    }
+
+    if (currentDMUserId === currentUser.id) {
+        const key = `selfChatHistory_${currentUser.id}`;
+        const history = JSON.parse(localStorage.getItem(key)) || [];
+        const messageIndex = history.findIndex(msg => msg.id === messageId);
+        if (messageIndex !== -1) {
+            history[messageIndex].pinned = Boolean(pinned);
+            history[messageIndex].pinnedAt = pinned ? (pinnedAt || new Date().toISOString()) : null;
+            localStorage.setItem(key, JSON.stringify(history));
+        }
+    }
+
+    rebuildPinnedMessagesBlock();
+}
+
 // Function to update a message in the UI
 function updateMessageInUI(updatedMessage) {
     const messageElement = document.querySelector(`[data-message-id="${updatedMessage.id}"]`);
@@ -3456,6 +3694,7 @@ function deleteMessageFromUI(messageId) {
     if (messageElement) {
         messageElement.remove();
     }
+    rebuildPinnedMessagesBlock();
     
     // Restore voice message handlers after deleting message
     setTimeout(() => {
@@ -4535,6 +4774,23 @@ function removeSelfChatReaction(messageId, emoji) {
     }
 }
 
+function toggleSelfChatMessagePin(messageId) {
+    const key = `selfChatHistory_${currentUser.id}`;
+    const history = JSON.parse(localStorage.getItem(key)) || [];
+    const messageIndex = history.findIndex(msg => msg.id === messageId);
+    if (messageIndex === -1) {
+        return;
+    }
+
+    const message = history[messageIndex];
+    const nextPinned = !Boolean(message.pinned);
+    message.pinned = nextPinned;
+    message.pinnedAt = nextPinned ? new Date().toISOString() : null;
+
+    localStorage.setItem(key, JSON.stringify(history));
+    updateMessagePinInUI(messageId, nextPinned, message.pinnedAt);
+}
+
 // Функция для обновления отображения сообщения в Self Chat
 function updateSelfChatMessage(messageId, updatedMessage) {
     const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
@@ -5187,6 +5443,7 @@ async function loadDMHistory(userId) {
    }
 
    messagesContainer.innerHTML = '';
+   ensurePinnedMessagesBlock();
 
    try {
        const response = await fetch(`${getApiUrl()}/api/dm/${userId}?t=${Date.now()}`, {
@@ -5215,9 +5472,12 @@ async function loadDMHistory(userId) {
                    file: message.file,  // Добавляем информацию о файле, если она есть
                    isVoiceMessage: isVoiceMessage, // Определяем, является ли это голосовым сообщением
                    edited: message.edited,  // Добавляем флаг редактирования, если он существует
+                   pinned: Boolean(message.pinned),
+                   pinnedAt: message.pinnedAt || null,
                    replyTo: message.replyTo || null  // Добавляем информацию об ответе
                });
            });
+           rebuildPinnedMessagesBlock();
        } else {
            console.error('Failed to load DM history');
        }

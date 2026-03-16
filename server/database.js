@@ -42,6 +42,8 @@ function initializeDatabase() {
             sender_id INTEGER,
             receiver_id INTEGER,
             reply_to_id INTEGER,
+            is_pinned BOOLEAN DEFAULT FALSE,
+            pinned_at DATETIME,
             read BOOLEAN DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -229,6 +231,24 @@ function initializeDatabase() {
     try {
         db.exec('ALTER TABLE direct_messages ADD COLUMN original_content TEXT');
         console.log('Migration: Added original_content column to direct_messages');
+    } catch (error) {
+        if (!error.message.includes('duplicate column')) {
+            console.error('Migration error:', error);
+        }
+    }
+
+    try {
+        db.exec('ALTER TABLE direct_messages ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE');
+        console.log('Migration: Added is_pinned column to direct_messages');
+    } catch (error) {
+        if (!error.message.includes('duplicate column')) {
+            console.error('Migration error:', error);
+        }
+    }
+
+    try {
+        db.exec('ALTER TABLE direct_messages ADD COLUMN pinned_at DATETIME');
+        console.log('Migration: Added pinned_at column to direct_messages');
     } catch (error) {
         if (!error.message.includes('duplicate column')) {
             console.error('Migration error:', error);
@@ -477,7 +497,16 @@ const dmDB = {
         const stmt = db.prepare('INSERT INTO direct_messages (content, original_content, sender_id, receiver_id, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?)');
         const ts = timestamp || new Date().toISOString();
         const result = stmt.run(content, content, senderId, receiverId, replyToId, ts);
-        return Promise.resolve({ id: result.lastInsertRowid, content, senderId, receiverId, reply_to_id: replyToId, created_at: ts });
+        return Promise.resolve({
+            id: result.lastInsertRowid,
+            content,
+            senderId,
+            receiverId,
+            reply_to_id: replyToId,
+            created_at: ts,
+            is_pinned: 0,
+            pinned_at: null
+        });
     },
 
     getConversation: (userId1, userId2, limit = 50) => {
@@ -499,6 +528,8 @@ const dmDB = {
             ...row,
             edited: Boolean(row.is_edited),
             originalContent: row.is_edited ? row.original_content : undefined,
+            pinned: Boolean(row.is_pinned),
+            pinnedAt: row.pinned_at || null,
             replyTo: row.reply_to_id ? {
                 id: row.reply_to_id,
                 author: row.reply_to_author,
@@ -555,6 +586,35 @@ const dmDB = {
         const stmt = db.prepare('UPDATE direct_messages SET read = 1 WHERE id = ?');
         stmt.run(messageId);
         return Promise.resolve();
+    },
+
+    setPinned: (messageId, pinned) => {
+        if (pinned) {
+            db.prepare('UPDATE direct_messages SET is_pinned = 1, pinned_at = CURRENT_TIMESTAMP WHERE id = ?').run(messageId);
+        } else {
+            db.prepare('UPDATE direct_messages SET is_pinned = 0, pinned_at = NULL WHERE id = ?').run(messageId);
+        }
+        return Promise.resolve();
+    },
+
+    togglePinned: (messageId) => {
+        const message = db.prepare('SELECT is_pinned FROM direct_messages WHERE id = ?').get(messageId);
+        if (!message) {
+            return Promise.resolve(null);
+        }
+
+        const nextPinned = !Boolean(message.is_pinned);
+        if (nextPinned) {
+            db.prepare('UPDATE direct_messages SET is_pinned = 1, pinned_at = CURRENT_TIMESTAMP WHERE id = ?').run(messageId);
+        } else {
+            db.prepare('UPDATE direct_messages SET is_pinned = 0, pinned_at = NULL WHERE id = ?').run(messageId);
+        }
+
+        const updated = db.prepare('SELECT is_pinned, pinned_at FROM direct_messages WHERE id = ?').get(messageId);
+        return Promise.resolve({
+            pinned: Boolean(updated.is_pinned),
+            pinnedAt: updated.pinned_at || null
+        });
     }
 };
 
