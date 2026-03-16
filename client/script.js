@@ -2522,33 +2522,41 @@ function addMessageToUI(message) {
         speedBtn.style.background = 'transparent';
         speedBtn.style.border = '1px solid var(--accent)';
         speedBtn.style.borderRadius = '8px';
-        speedBtn.style.padding = '4px 10px';
+        speedBtn.style.width = '44px';
+        speedBtn.style.height = '28px';
+        speedBtn.style.padding = '0';
         speedBtn.style.cursor = 'pointer';
         speedBtn.style.color = 'var(--accent)';
         speedBtn.style.fontSize = '12px';
         speedBtn.style.fontWeight = '600';
+        speedBtn.style.display = 'inline-flex';
+        speedBtn.style.alignItems = 'center';
+        speedBtn.style.justifyContent = 'center';
 
         // Transcribe button
         const transcribeBtn = document.createElement('button');
         transcribeBtn.className = 'voice-transcribe-small-btn';
-        transcribeBtn.innerHTML = `
-            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path fill="currentColor" d="M14.25 2.001c0-.892-.339-1.751-.948-2.405l-.859 1.135c.375.403.607.942.607 1.535 0 1.242-1.008 2.25-2.25 2.25s-2.25-1.008-2.25-2.25c0-.593.232-1.132.607-1.535L8.25 1.266c-.609.654-.948 1.513-.948 2.405 0 1.795 1.455 3.25 3.25 3.25s3.25-1.455 3.25-3.25v-1.669z"/>
-                <path fill="currentColor" d="M12 7.5c-3.038 0-5.5 2.462-5.5 5.5v2.25H5.25c-.69 0-1.25.56-1.25 1.25v3c0 .69.56 1.25 1.25 1.25h13.5c.69 0 1.25-.56 1.25-1.25v-3c0-.69-.56-1.25-1.25-1.25H17.5v-2.25c0-3.038-2.462-5.5-5.5-5.5zm-3.5 5.5c0-1.933 1.567-3.5 3.5-3.5s3.5 1.567 3.5 3.5v2.25H8.5v-2.25z"/>
+        const transcribeIcon = `
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M4 6h16v2H4zM4 11h10v2H4zM4 16h16v2H4z"/>
             </svg>
         `;
+        transcribeBtn.innerHTML = transcribeIcon;
+        transcribeBtn.setAttribute('aria-label', window.i18n ? window.i18n.t('actions.transcribe') : 'Transcribe');
         transcribeBtn.title = window.i18n ? window.i18n.t('actions.transcribe') : 'Расшифровать';
         transcribeBtn.style.background = 'transparent';
-        transcribeBtn.style.border = '1px solid var(--muted)';
+        transcribeBtn.style.border = '1px solid var(--accent)';
         transcribeBtn.style.borderRadius = '8px';
-        transcribeBtn.style.padding = '6px 10px';
+        transcribeBtn.style.width = '44px';
+        transcribeBtn.style.height = '28px';
+        transcribeBtn.style.padding = '0';
         transcribeBtn.style.cursor = 'pointer';
-        transcribeBtn.style.color = 'var(--muted)';
+        transcribeBtn.style.color = 'var(--accent)';
         transcribeBtn.style.fontSize = '12px';
         transcribeBtn.style.fontWeight = '600';
-        transcribeBtn.style.display = 'flex';
+        transcribeBtn.style.display = 'inline-flex';
         transcribeBtn.style.alignItems = 'center';
-        transcribeBtn.style.gap = '6px';
+        transcribeBtn.style.justifyContent = 'center';
 
         // Duration display (in controls container)
         const durationDisplay = document.createElement('span');
@@ -2601,7 +2609,7 @@ function addMessageToUI(message) {
 
             isTranscribing = true;
             transcribeBtn.classList.add('transcribing');
-            transcribeBtn.innerHTML = '⟳';
+            transcribeBtn.innerHTML = '...';
 
             try {
                 console.log('[Transcribe] Starting transcription...');
@@ -2655,24 +2663,14 @@ function addMessageToUI(message) {
 
                 transcribeBtn.innerHTML = '✓';
                 setTimeout(() => {
-                    transcribeBtn.innerHTML = `
-                        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <path fill="currentColor" d="M14.25 2.001c0-.892-.339-1.751-.948-2.405l-.859 1.135c.375.403.607.942.607 1.535 0 1.242-1.008 2.25-2.25 2.25s-2.25-1.008-2.25-2.25c0-.593.232-1.132.607-1.535L8.25 1.266c-.609.654-.948 1.513-.948 2.405 0 1.795 1.455 3.25 3.25 3.25s3.25-1.455 3.25-3.25v-1.669z"/>
-                            <path fill="currentColor" d="M12 7.5c-3.038 0-5.5 2.462-5.5 5.5v2.25H5.25c-.69 0-1.25.56-1.25 1.25v3c0 .69.56 1.25 1.25 1.25h13.5c.69 0 1.25-.56 1.25-1.25v-3c0-.69-.56-1.25-1.25-1.25H17.5v-2.25c0-3.038-2.462-5.5-5.5-5.5zm-3.5 5.5c0-1.933 1.567-3.5 3.5-3.5s3.5 1.567 3.5 3.5v2.25H8.5v-2.25z"/>
-                        </svg>
-                    `;
+                    transcribeBtn.innerHTML = transcribeIcon;
                 }, 2000);
             } catch (error) {
                 console.error('[Transcribe] Error transcribing voice message:', error);
                 alert('Failed to transcribe: ' + error.message);
                 transcribeBtn.innerHTML = '✕';
                 setTimeout(() => {
-                    transcribeBtn.innerHTML = `
-                        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <path fill="currentColor" d="M14.25 2.001c0-.892-.339-1.751-.948-2.405l-.859 1.135c.375.403.607.942.607 1.535 0 1.242-1.008 2.25-2.25 2.25s-2.25-1.008-2.25-2.25c0-.593.232-1.132.607-1.535L8.25 1.266c-.609.654-.948 1.513-.948 2.405 0 1.795 1.455 3.25 3.25 3.25s3.25-1.455 3.25-3.25v-1.669z"/>
-                            <path fill="currentColor" d="M12 7.5c-3.038 0-5.5 2.462-5.5 5.5v2.25H5.25c-.69 0-1.25.56-1.25 1.25v3c0 .69.56 1.25 1.25 1.25h13.5c.69 0 1.25-.56 1.25-1.25v-3c0-.69-.56-1.25-1.25-1.25H17.5v-2.25c0-3.038-2.462-5.5-5.5-5.5zm-3.5 5.5c0-1.933 1.567-3.5 3.5-3.5s3.5 1.567 3.5 3.5v2.25H8.5v-2.25z"/>
-                        </svg>
-                    `;
+                    transcribeBtn.innerHTML = transcribeIcon;
                 }, 2000);
             } finally {
                 isTranscribing = false;

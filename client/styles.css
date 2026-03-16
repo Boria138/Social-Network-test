@@ -3922,8 +3922,8 @@ body.drawer-open{
 }
 
 .voice-transcribe-small-btn.transcribing {
-    background: linear-gradient(135deg, #8b5cf6, #7c3aed) !important;
-    border-color: transparent !important;
-    color: #fff !important;
+    background: var(--accent-transparent) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
     animation: pulse-transcribe 1.5s infinite;
 }
