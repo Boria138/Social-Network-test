@@ -2287,8 +2287,8 @@ function addMessageToUI(message) {
     messageGroup.setAttribute('data-message-id', message.id || Date.now());
 
     // Проверяем, является ли сообщение отправленным текущим пользователем
-    // Исключаем self chat, так как все сообщения там от текущего пользователя
-    const isUserMessage = message.author === currentUser.username && currentDMUserId !== currentUser.id;
+    const isUserMessage = Number(message.senderId) === Number(currentUser.id) ||
+        message.author === currentUser.username;
     if (isUserMessage) {
         messageGroup.classList.add('user-message');
     }
@@ -5051,6 +5051,7 @@ async function loadDMHistory(userId) {
                
                addMessageToUI({
                    id: message.id,
+                   senderId: message.sender_id,
                    author: message.username,
                    avatar: message.avatar || message.username.charAt(0).toUpperCase(),
                    text: message.content,
