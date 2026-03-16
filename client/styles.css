@@ -2412,6 +2412,18 @@ body::after{
     color: #fff;
 }
 
+.close-call-btn svg,
+.settings-modal-close svg,
+.friend-action-btn svg,
+.reply-preview-cancel svg,
+.forward-picker-close svg,
+.link-preview-hide svg,
+.size-control-btn svg,
+.voice-transcribe-small-btn svg {
+    display: block;
+    pointer-events: none;
+}
+
 /* Double click hint */
 .participant::after {
     content: 'Double-click to fullscreen';
@@ -3077,7 +3089,6 @@ body::after{
     background: none;
     border: 1px solid transparent;
     font-size: 22px;
-    font-family: "Noto Color Emoji", sans-serif;
     cursor: pointer;
     padding: 8px;
     border-radius: 12px;

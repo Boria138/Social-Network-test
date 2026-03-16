@@ -722,6 +722,27 @@ progress.style.background = 'linear-gradient(90deg, rgba(88, 101, 242, 0.6) 0%, 
 - `--fg` — Foreground/text color
 - `--glass` — Glass/panel background
 
+### Iconography & Emoji Rules
+
+**CRITICAL:** UI icons and emoji MUST NOT depend on system fonts.
+
+| Element | Required | Forbidden |
+|---------|----------|-----------|
+| UI icons (buttons, controls, status) | Inline SVG or existing SVG assets | Unicode symbol icons (`✓`, `✕`, `⛶`, `×`, etc.) |
+| Emoji in UI text | Twemoji rendering (`twemoji.parse` with SVG output) | Raw system emoji glyphs without Twemoji |
+| Favicon/app icon | Static SVG/PNG asset | Emoji-based data URI favicon |
+
+```javascript
+// ALWAYS: SVG icon in controls
+button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="..."/></svg>';
+
+// ALWAYS: Twemoji parse for emoji text
+twemoji.parse(container, { folder: 'svg', ext: '.svg' });
+
+// NEVER: font-dependent symbol icon
+button.textContent = '✕'; // Bad
+```
+
 ### Imports
 ```javascript
 // Standard library

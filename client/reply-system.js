@@ -184,7 +184,9 @@ function showReplyPreview() {
                 <span class="reply-preview-text">${getReplyPreviewText(currentReplyTo)}</span>
             </div>
         </div>
-        <button class="reply-preview-cancel" onclick="cancelReply()" title="Cancel reply">×</button>
+        <button class="reply-preview-cancel" onclick="cancelReply()" title="Cancel reply" aria-label="Cancel reply">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z"/></svg>
+        </button>
     `;
 
     // Вставляем превью перед input container

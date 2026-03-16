@@ -29,6 +29,10 @@ let isMobileView = window.innerWidth <= 820;
 let editingMessageId = null;
 let pinnedMessageIds = [];
 let activePinnedMessageIndex = 0;
+let twemojiObserver = null;
+let twemojiParseTimer = null;
+const twemojiPendingNodes = new Set();
+let isTwemojiParsing = false;
 
 // Variables for voice recording
 let isRecording = false;
@@ -42,9 +46,86 @@ const hiddenPreviews = new Set();
 
 // Notification service
 let notificationService = null;
+const ICON_SVG = {
+    check: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+    close: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z"/></svg>',
+    fullscreen: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7 14H5v5h5v-2H7zm0-4h2V7h3V5H5zm10 7h-3v2h5v-5h-2zm0-12v2h-3v2h5V5z"/></svg>'
+};
+
+function parseTwemoji(root = document.body) {
+    if (typeof twemoji === 'undefined' || !root) return;
+
+    isTwemojiParsing = true;
+    try {
+        twemoji.parse(root, {
+            folder: 'svg',
+            ext: '.svg'
+        });
+    } finally {
+        isTwemojiParsing = false;
+    }
+}
+
+function queueTwemojiParse(node) {
+    if (typeof twemoji === 'undefined' || !node) return;
+
+    const targetNode = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+    if (!targetNode || targetNode.nodeType !== Node.ELEMENT_NODE) return;
+    if (targetNode.matches && targetNode.matches('img.emoji')) return;
+
+    twemojiPendingNodes.add(targetNode);
+    if (twemojiParseTimer) return;
+
+    twemojiParseTimer = setTimeout(() => {
+        twemojiParseTimer = null;
+        const nodes = Array.from(twemojiPendingNodes);
+        twemojiPendingNodes.clear();
+        nodes.forEach(parseTwemoji);
+    }, 0);
+}
+
+function initializeTwemojiRendering() {
+    if (typeof twemoji === 'undefined' || !document.body) return;
+
+    parseTwemoji(document.body);
+
+    if (twemojiObserver) {
+        twemojiObserver.disconnect();
+    }
+
+    twemojiObserver = new MutationObserver((mutations) => {
+        if (isTwemojiParsing) return;
+
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'characterData') {
+                queueTwemojiParse(mutation.target);
+                return;
+            }
+
+            mutation.addedNodes.forEach((addedNode) => {
+                if (addedNode.nodeType === Node.TEXT_NODE) {
+                    queueTwemojiParse(addedNode);
+                    return;
+                }
+
+                if (addedNode.nodeType !== Node.ELEMENT_NODE) return;
+                if (addedNode.matches && addedNode.matches('img.emoji')) return;
+                queueTwemojiParse(addedNode);
+            });
+        });
+    });
+
+    twemojiObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    initializeTwemojiRendering();
+
     token = localStorage.getItem('token');
     const userStr = localStorage.getItem('currentUser');
 
@@ -930,7 +1011,7 @@ function addNewsMessageToUI(message) {
     
     // Применяем Twemoji к сообщению
     if (typeof twemoji !== 'undefined') {
-        twemoji.parse(div);
+        parseTwemoji(div);
     }
 }
 
@@ -1272,8 +1353,8 @@ async function loadPendingRequests() {
                     <div class="friend-status">Incoming Friend Request</div>
                 </div>
                 <div class="friend-actions">
-                    <button class="friend-action-btn accept" onclick="acceptFriendRequest(${request.id})">✓</button>
-                    <button class="friend-action-btn reject" onclick="rejectFriendRequest(${request.id})">✕</button>
+                    <button class="friend-action-btn accept" onclick="acceptFriendRequest(${request.id})" aria-label="Accept">${ICON_SVG.check}</button>
+                    <button class="friend-action-btn reject" onclick="rejectFriendRequest(${request.id})" aria-label="Reject">${ICON_SVG.close}</button>
                 </div>
             `;
             
@@ -2661,14 +2742,14 @@ function addMessageToUI(message) {
                     console.warn('[Transcribe] Message input not found');
                 }
 
-                transcribeBtn.innerHTML = '✓';
+                transcribeBtn.innerHTML = ICON_SVG.check;
                 setTimeout(() => {
                     transcribeBtn.innerHTML = transcribeIcon;
                 }, 2000);
             } catch (error) {
                 console.error('[Transcribe] Error transcribing voice message:', error);
                 alert('Failed to transcribe: ' + error.message);
-                transcribeBtn.innerHTML = '✕';
+                transcribeBtn.innerHTML = ICON_SVG.close;
                 setTimeout(() => {
                     transcribeBtn.innerHTML = transcribeIcon;
                 }, 2000);
@@ -3139,7 +3220,7 @@ function addMessageToUI(message) {
     rebuildPinnedMessagesBlock();
 
     if (typeof twemoji !== 'undefined') {
-        twemoji.parse(messageGroup);
+        parseTwemoji(messageGroup);
     }
 
     // Highlight code blocks with Prism.js
@@ -3383,7 +3464,7 @@ function showForwardPicker(recipients) {
             <div class="forward-picker-content">
                 <div class="forward-picker-header">
                     <h3>${escapeHtml(title)}</h3>
-                    <button type="button" class="forward-picker-close" aria-label="${escapeHtml(closeLabel)}">&times;</button>
+                    <button type="button" class="forward-picker-close" aria-label="${escapeHtml(closeLabel)}">${ICON_SVG.close}</button>
                 </div>
                 <div class="forward-picker-list">${listHtml}</div>
             </div>
@@ -3670,7 +3751,7 @@ function updateMessageInUI(updatedMessage) {
 
             // Re-parse emojis if twemoji is available
             if (typeof twemoji !== 'undefined') {
-                twemoji.parse(messageTextElement);
+                parseTwemoji(messageTextElement);
             }
 
             // Re-highlight code blocks with Prism.js
@@ -4285,7 +4366,7 @@ function createLinkPreviewCard(metadata, messageId, url) {
     
     const hideBtn = document.createElement('button');
     hideBtn.className = 'link-preview-hide';
-    hideBtn.textContent = '✕';
+    hideBtn.innerHTML = ICON_SVG.close;
     hideBtn.title = 'Hide preview';
     hideBtn.onclick = () => hideLinkPreview(messageId, url);
     
@@ -4643,12 +4724,12 @@ function createFullEmojiPicker(onSelect) {
         content.appendChild(grid);
 
         if (typeof twemoji !== 'undefined') {
-            twemoji.parse(content);
+            parseTwemoji(content);
         }
     }
 
     if (typeof twemoji !== 'undefined') {
-        twemoji.parse(tabs);
+        parseTwemoji(tabs);
     }
 
     renderCategory(categoryKeys[0]);
@@ -4707,7 +4788,7 @@ function updateMessageReactions(messageId, reactions) {
     });
 
     if (typeof twemoji !== 'undefined') {
-        twemoji.parse(reactionsContainer);
+        parseTwemoji(reactionsContainer);
     }
 }
 
@@ -5760,7 +5841,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             sizeControls.innerHTML = `
                 <button class="size-control-btn minimize-btn" title="Minimize">_</button>
                 <button class="size-control-btn maximize-btn" title="Maximize">□</button>
-                <button class="size-control-btn fullscreen-btn" title="Fullscreen">⛶</button>
+                <button class="size-control-btn fullscreen-btn" title="Fullscreen">${ICON_SVG.fullscreen}</button>
             `;
 
             if (!element.querySelector('.resize-handle')) {
@@ -6075,7 +6156,7 @@ function makeResizable(element) {
     sizeControls.innerHTML = `
         <button class="size-control-btn minimize-btn" title="Minimize">_</button>
         <button class="size-control-btn maximize-btn" title="Maximize">□</button>
-        <button class="size-control-btn fullscreen-btn" title="Fullscreen">⛶</button>
+        <button class="size-control-btn fullscreen-btn" title="Fullscreen">${ICON_SVG.fullscreen}</button>
     `;
     sizeControls.style.cssText = `
         position: absolute;
