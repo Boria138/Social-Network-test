@@ -276,6 +276,9 @@ window.I18N = {
     "theme.sunsetPurple": "Sunset Purple",
     "theme.oceanBlue": "Ocean Blue",
     "theme.coffeeBrown": "Coffee Brown",
+    "theme.highContrast": "High Contrast",
+    "theme.deuteranopia": "Deuteranopia Friendly",
+    "theme.tritanopia": "Tritanopia Friendly",
     "theme.customColor": "Custom Color:",
     "theme.glassEffect": "Glass Effect:",
 
@@ -369,6 +372,9 @@ window.I18N = {
     "theme.sunsetPurple": "Фиолетовый закат",
     "theme.oceanBlue": "Океанская синяя",
     "theme.coffeeBrown": "Кофейная коричневая",
+    "theme.highContrast": "Высокая контрастность",
+    "theme.deuteranopia": "Для дейтеранопии",
+    "theme.tritanopia": "Для тританопии",
     "theme.customColor": "Пользовательский цвет:",
     "theme.glassEffect": "Эффект стекла:",
 

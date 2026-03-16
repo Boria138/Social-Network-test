@@ -6339,6 +6339,42 @@ const THEMES = {
         '--muted-2': 'rgba(255,255,255,.48)',
         '--stroke': 'rgba(255,255,255,.08)',
         '--stroke-soft': 'rgba(255,255,255,.05)'
+    },
+    highContrast: {
+        '--bg-0': '#050507',
+        '--bg-1': '#0f1013',
+        '--glass': 'rgba(10, 10, 12, .92)',
+        '--glass-2': 'rgba(14, 15, 18, .84)',
+        '--glass-strong': 'rgba(8, 8, 10, .96)',
+        '--text': 'rgba(255,255,255,.98)',
+        '--muted': 'rgba(255,255,255,.82)',
+        '--muted-2': 'rgba(255,255,255,.70)',
+        '--stroke': 'rgba(255,255,255,.22)',
+        '--stroke-soft': 'rgba(255,255,255,.14)'
+    },
+    deuteranopia: {
+        '--bg-0': '#0e1724',
+        '--bg-1': '#1a2738',
+        '--glass': 'rgba(16, 27, 42, .88)',
+        '--glass-2': 'rgba(22, 36, 54, .78)',
+        '--glass-strong': 'rgba(14, 24, 38, .94)',
+        '--text': 'rgba(255,255,255,.94)',
+        '--muted': 'rgba(255,255,255,.70)',
+        '--muted-2': 'rgba(255,255,255,.56)',
+        '--stroke': 'rgba(255,255,255,.11)',
+        '--stroke-soft': 'rgba(255,255,255,.07)'
+    },
+    tritanopia: {
+        '--bg-0': '#1b1022',
+        '--bg-1': '#2a1730',
+        '--glass': 'rgba(36, 20, 44, .88)',
+        '--glass-2': 'rgba(45, 27, 54, .78)',
+        '--glass-strong': 'rgba(32, 18, 40, .94)',
+        '--text': 'rgba(255,255,255,.94)',
+        '--muted': 'rgba(255,255,255,.70)',
+        '--muted-2': 'rgba(255,255,255,.56)',
+        '--stroke': 'rgba(255,255,255,.11)',
+        '--stroke-soft': 'rgba(255,255,255,.07)'
     }
 };
 
@@ -6713,6 +6749,18 @@ function updateTransparency(level) {
         baseR = 60;
         baseG = 42;
         baseB = 31;
+    } else if (currentTheme === 'highContrast') {
+        baseR = 10;
+        baseG = 10;
+        baseB = 12;
+    } else if (currentTheme === 'deuteranopia') {
+        baseR = 16;
+        baseG = 27;
+        baseB = 42;
+    } else if (currentTheme === 'tritanopia') {
+        baseR = 36;
+        baseG = 20;
+        baseB = 44;
     } else { // default dark theme
         baseR = 16;
         baseG = 20;
