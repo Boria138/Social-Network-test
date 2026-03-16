@@ -2275,6 +2275,10 @@ body::after{
     background-color: #000;
 }
 
+#localVideo {
+    transform: none !important;
+}
+
 .participant.minimized {
     width: 120px;
     height: 90px;

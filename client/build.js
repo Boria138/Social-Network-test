@@ -87,7 +87,7 @@ function generateNewsJson() {
     
     const versionRegex = /^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})/;
     const sectionRegex = /^### (.+)/;
-    const changeRegex = /^- (.+)/;
+    const listItemRegex = /^(\s*)-\s+(.+)/;
     
     const iconMap = {
         'Добавлено': '✨',
@@ -125,13 +125,22 @@ function generateNewsJson() {
                 return;
             }
 
-            const changeMatch = line.match(changeRegex);
-            if (changeMatch && currentSection) {
-                let changeText = changeMatch[1].trim();
+            const listItemMatch = line.match(listItemRegex);
+            if (listItemMatch && currentSection) {
+                const indent = listItemMatch[1].replace(/\t/g, '    ').length;
+                const changeText = listItemMatch[2].trim();
                 // Пропускаем заголовки в изменениях
-                if (!changeText.startsWith('**')) {
-                    currentVersion.changes.push(changeText);
+                if (changeText.startsWith('**')) {
+                    return;
                 }
+                // Верхний уровень - новый пункт новости
+                if (indent === 0 || currentVersion.changes.length === 0) {
+                    currentVersion.changes.push(changeText);
+                    return;
+                }
+                // Вложенный пункт - добавляем к предыдущему изменению как markdown-список
+                const lastIndex = currentVersion.changes.length - 1;
+                currentVersion.changes[lastIndex] += `\n${' '.repeat(indent)}- ${changeText}`;
             }
         }
     });

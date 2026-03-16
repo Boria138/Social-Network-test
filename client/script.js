@@ -10,6 +10,16 @@ let inCall = false;
 let localStream = null;
 let screenStream = null;
 let peerConnections = {};
+let iceRestartAttempts = {};
+let iceRestartLocks = {};
+let iceRestartTimers = {};
+let makingOffers = {};
+let ignoreIncomingOffers = {};
+let settingRemoteAnswerPending = {};
+let seenRemoteCandidates = {};
+let screenAudioMixContext = null;
+let screenAudioMixDestination = null;
+let screenAudioMixNodes = [];
 let isVideoEnabled = true;
 let isAudioEnabled = true;
 let isMuted = false;
@@ -662,6 +672,7 @@ function connectToSocketIO() {
             // Handle when other party ends the call
             if (peerConnections[data.from]) {
                 peerConnections[data.from].close();
+                clearPeerConnectionRuntimeState(data.from);
                 delete peerConnections[data.from];
             }
             const remoteVideo = document.getElementById(`remote-${data.from}`);
@@ -820,7 +831,8 @@ async function loadNewsFromFile() {
 
 // Преобразование новости в сообщение канала
 function newsToChannelMessage(news) {
-    const content = `📢 **${news.title}** (v${news.version})\n\n${news.changes.map(c => `• ${c}`).join('\n')}`;
+    const title = news.title || `Версия ${news.version}`;
+    const content = `**${title}**\n\n${news.changes.map(c => `• ${c}`).join('\n')}`;
     return {
         id: `news-${news.id}`,
         content: content,
@@ -1501,7 +1513,7 @@ async function initiateCall(friendId, type) {
 
         // Set local video
         const localVideo = document.getElementById('localVideo');
-        localVideo.srcObject = localStream;
+        updateLocalVideoPreview(localVideo, localStream);
 
         // Store call details
         window.currentCallDetails = {
@@ -1720,7 +1732,7 @@ async function joinExistingCall(inviter, callId, type) {
         document.querySelector('.call-channel-name').textContent = `Joined call with ${inviter.username || 'Participant'}`;
 
         const localVideo = document.getElementById('localVideo');
-        localVideo.srcObject = localStream;
+        updateLocalVideoPreview(localVideo, localStream);
 
         // Store call details
         window.currentCallDetails = {
@@ -1776,7 +1788,7 @@ async function acceptCall(caller, type) {
         document.querySelector('.call-channel-name').textContent = `Call with ${caller.username}`;
         
         const localVideo = document.getElementById('localVideo');
-        localVideo.srcObject = localStream;
+        updateLocalVideoPreview(localVideo, localStream);
         
         // Store call details
         window.currentCallDetails = {
@@ -3804,6 +3816,7 @@ function formatQuotedText(text) {
     let formattedLines = [];
     let inList = false;
     let listType = null;
+    let listStack = [];
     let inCodeBlock = false;
     let codeBlockContent = [];
     let codeBlockLanguage = '';
@@ -3815,11 +3828,28 @@ function formatQuotedText(text) {
     let inDetailsList = false;
     let detailsListType = null;
 
+    const syncListState = () => {
+        inList = listStack.length > 0;
+        listType = inList ? listStack[listStack.length - 1] : null;
+    };
+
+    const openList = (type) => {
+        formattedLines.push(`<${type} class="md-list md-${type}">`);
+        listStack.push(type);
+        syncListState();
+    };
+
     const closeList = () => {
-        if (inList) {
-            formattedLines.push(`</${listType}>`);
-            inList = false;
-            listType = null;
+        if (listStack.length > 0) {
+            const type = listStack.pop();
+            formattedLines.push(`</${type}>`);
+        }
+        syncListState();
+    };
+
+    const closeAllLists = () => {
+        while (listStack.length > 0) {
+            closeList();
         }
     };
 
@@ -4086,7 +4116,7 @@ function formatQuotedText(text) {
             } else {
                 // Code block outside details
                 if (!inCodeBlock) {
-                    closeList();
+                    closeAllLists();
                     inCodeBlock = true;
                     const langMatch = trimmedLine.match(/^```(\w+)?/);
                     codeBlockLanguage = langMatch && langMatch[1] ? langMatch[1] : 'plaintext';
@@ -4109,7 +4139,7 @@ function formatQuotedText(text) {
 
         // Check for <details> start
         if (trimmedLine.startsWith('<details>')) {
-            closeList();
+            closeAllLists();
             inDetails = true;
             // Check if summary is on the same line <details><summary>text</summary>
             const summaryMatch = trimmedLine.match(/<details><summary>(.*?)<\/summary>(.*)?$/i);
@@ -4215,14 +4245,14 @@ function formatQuotedText(text) {
 
         // Empty line
         if (trimmedLine === '') {
-            closeList();
+            closeAllLists();
             formattedLines.push('<br>');
             continue;
         }
 
         // Check for HTML block placeholder
         if (trimmedLine.startsWith('%%HTMLBLOCK') && trimmedLine.endsWith('%%')) {
-            closeList();
+            closeAllLists();
             formattedLines.push(trimmedLine);
             continue;
         }
@@ -4239,7 +4269,7 @@ function formatQuotedText(text) {
         // Headers
         const headerMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/);
         if (headerMatch) {
-            closeList();
+            closeAllLists();
             // Add horizontal rule before header (except if it's the first element)
             if (formattedLines.length > 0) {
                 formattedLines.push('<hr class="md-hr">');
@@ -4250,45 +4280,54 @@ function formatQuotedText(text) {
             continue;
         }
 
-        // Unordered lists
-        const ulMatch = trimmedLine.match(/^[\*\-\+]\s+(.+)$/);
-        if (ulMatch) {
-            if (!inList || listType !== 'ul') {
-                closeList();
-                formattedLines.push('<ul class="md-list md-ul">');
-                inList = true;
-                listType = 'ul';
-            }
-            formattedLines.push(`<li class="md-list-item">${formatInline(ulMatch[1])}</li>`);
-            continue;
-        }
+        // Lists (supports nested lists by indentation)
+        const listMatch = line.match(/^(\s*)([\*\-\+]|\d+\.)\s+(.+)$/);
+        if (listMatch) {
+            const indent = listMatch[1].replace(/\t/g, '    ').length;
+            const marker = listMatch[2];
+            const content = listMatch[3];
+            const itemType = /^\d+\.$/.test(marker) ? 'ol' : 'ul';
+            let targetDepth = Math.floor(indent / 2) + 1;
 
-        // Ordered lists
-        const olMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
-        if (olMatch) {
-            if (!inList || listType !== 'ol') {
-                closeList();
-                formattedLines.push('<ol class="md-list md-ol">');
-                inList = true;
-                listType = 'ol';
+            // Avoid invalid jumps deeper than one level at a time.
+            if (targetDepth > listStack.length + 1) {
+                targetDepth = listStack.length + 1;
             }
-            formattedLines.push(`<li class="md-list-item">${formatInline(olMatch[2])}</li>`);
+
+            while (listStack.length > targetDepth) {
+                closeList();
+            }
+
+            if (listStack.length === targetDepth && listStack[targetDepth - 1] && listStack[targetDepth - 1] !== itemType) {
+                closeList();
+            }
+
+            while (listStack.length < targetDepth) {
+                openList(itemType);
+            }
+
+            if (listStack[listStack.length - 1] !== itemType) {
+                closeList();
+                openList(itemType);
+            }
+
+            formattedLines.push(`<li class="md-list-item">${formatInline(content)}</li>`);
             continue;
         }
 
         // Horizontal rule
         if (/^(\-{3,}|\*{3,}|_{3,})$/.test(trimmedLine)) {
-            closeList();
+            closeAllLists();
             formattedLines.push('<hr class="md-hr">');
             continue;
         }
 
         // Regular text line
-        closeList();
+        closeAllLists();
         formattedLines.push(`<div class="md-paragraph">${hasHtmlTags ? allowHtml(trimmedLine) : formatInline(trimmedLine)}</div>`);
     }
 
-    closeList();
+    closeAllLists();
     closeCodeBlock();
     closeDetails();
 
@@ -5171,7 +5210,7 @@ async function initializeMedia() {
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
         
         const localVideo = document.getElementById('localVideo');
-        localVideo.srcObject = localStream;
+        updateLocalVideoPreview(localVideo, localStream);
         
         // Log audio track status
         const audioTracks = localStream.getAudioTracks();
@@ -5291,17 +5330,27 @@ async function toggleScreenShare() {
 
         // Replace screen track with camera track in all peer connections
         const videoTrack = localStream.getVideoTracks()[0];
+        const micAudioTrack = localStream.getAudioTracks()[0];
+        if (videoTrack) {
+            videoTrack.contentHint = 'motion';
+        }
         Object.values(peerConnections).forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-            if (sender && videoTrack) {
-                sender.replaceTrack(videoTrack);
+            const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (videoSender && videoTrack) {
+                videoSender.replaceTrack(videoTrack);
+                optimizeSenderParameters(pc, videoTrack);
+            }
+            const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+            if (audioSender && micAudioTrack) {
+                audioSender.replaceTrack(micAudioTrack);
             }
         });
+        cleanupScreenAudioMix();
 
         screenStream = null;
 
         const localVideo = document.getElementById('localVideo');
-        localVideo.srcObject = localStream;
+        updateLocalVideoPreview(localVideo, localStream);
 
         updateCallButtons();
     } else {
@@ -5343,22 +5392,32 @@ async function toggleScreenShare() {
             }
 
             const screenTrack = screenStream.getVideoTracks()[0];
+            const outgoingAudioTrack = await createScreenShareOutgoingAudioTrack(screenStream, localStream);
+            if (screenTrack) {
+                screenTrack.contentHint = 'detail';
+            }
 
             // Replace video track in all peer connections
             Object.values(peerConnections).forEach(pc => {
-                const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                if (sender) {
-                    sender.replaceTrack(screenTrack);
+                const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (videoSender) {
+                    videoSender.replaceTrack(screenTrack);
+                    optimizeSenderParameters(pc, screenTrack);
+                }
+                const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+                if (audioSender && outgoingAudioTrack) {
+                    audioSender.replaceTrack(outgoingAudioTrack);
                 }
             });
 
             // Show screen share in local video
             const localVideo = document.getElementById('localVideo');
+            const previewAudioTracks = outgoingAudioTrack ? [outgoingAudioTrack] : localStream.getAudioTracks();
             const mixedStream = new MediaStream([
                 screenTrack,
-                ...localStream.getAudioTracks()
+                ...previewAudioTracks
             ]);
-            localVideo.srcObject = mixedStream;
+            updateLocalVideoPreview(localVideo, mixedStream);
 
             // Handle screen share ending
             screenTrack.addEventListener('ended', () => {
@@ -5390,22 +5449,32 @@ async function toggleScreenShare() {
                     screenStream = await navigator.mediaDevices.getUserMedia(constraints);
                     
                     const screenTrack = screenStream.getVideoTracks()[0];
+                    const outgoingAudioTrack = await createScreenShareOutgoingAudioTrack(screenStream, localStream);
+                    if (screenTrack) {
+                        screenTrack.contentHint = 'detail';
+                    }
 
                     // Replace video track in all peer connections
                     Object.values(peerConnections).forEach(pc => {
-                        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                        if (sender) {
-                            sender.replaceTrack(screenTrack);
+                        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                        if (videoSender) {
+                            videoSender.replaceTrack(screenTrack);
+                            optimizeSenderParameters(pc, screenTrack);
+                        }
+                        const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+                        if (audioSender && outgoingAudioTrack) {
+                            audioSender.replaceTrack(outgoingAudioTrack);
                         }
                     });
 
                     // Show screen share in local video
                     const localVideo = document.getElementById('localVideo');
+                    const previewAudioTracks = outgoingAudioTrack ? [outgoingAudioTrack] : localStream.getAudioTracks();
                     const mixedStream = new MediaStream([
                         screenTrack,
-                        ...localStream.getAudioTracks()
+                        ...previewAudioTracks
                     ]);
-                    localVideo.srcObject = mixedStream;
+                    updateLocalVideoPreview(localVideo, mixedStream);
 
                     // Handle screen share ending
                     screenTrack.addEventListener('ended', () => {
@@ -5456,6 +5525,58 @@ function updateCallButtons() {
             }
         }
     }
+}
+
+function updateLocalVideoPreview(videoElement, stream) {
+    if (!videoElement) return;
+    videoElement.srcObject = stream;
+    videoElement.style.transform = 'none';
+}
+
+function cleanupScreenAudioMix() {
+    screenAudioMixNodes.forEach(node => {
+        try {
+            node.disconnect();
+        } catch (e) {
+            console.warn('Failed to disconnect audio node:', e.message);
+        }
+    });
+    screenAudioMixNodes = [];
+    if (screenAudioMixContext) {
+        screenAudioMixContext.close().catch(() => {});
+    }
+    screenAudioMixContext = null;
+    screenAudioMixDestination = null;
+}
+
+async function createScreenShareOutgoingAudioTrack(currentScreenStream, currentLocalStream) {
+    const screenAudioTrack = currentScreenStream ? currentScreenStream.getAudioTracks()[0] : null;
+    const micAudioTrack = currentLocalStream ? currentLocalStream.getAudioTracks()[0] : null;
+    if (!screenAudioTrack) return micAudioTrack || null;
+    if (!micAudioTrack) return screenAudioTrack;
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return screenAudioTrack;
+
+    cleanupScreenAudioMix();
+    screenAudioMixContext = new AudioContextClass();
+    screenAudioMixDestination = screenAudioMixContext.createMediaStreamDestination();
+    if (screenAudioMixContext.state === 'suspended') {
+        await screenAudioMixContext.resume().catch(() => {});
+    }
+
+    const connectTrack = (track, gainValue) => {
+        const source = screenAudioMixContext.createMediaStreamSource(new MediaStream([track]));
+        const gain = screenAudioMixContext.createGain();
+        gain.gain.value = gainValue;
+        source.connect(gain);
+        gain.connect(screenAudioMixDestination);
+        screenAudioMixNodes.push(source, gain);
+    };
+
+    connectTrack(screenAudioTrack, 1.0);
+    connectTrack(micAudioTrack, 1.0);
+    return screenAudioMixDestination.stream.getAudioTracks()[0] || screenAudioTrack;
 }
 
 function initializeDraggableCallWindow() {
@@ -5660,6 +5781,112 @@ function populateDMList(friends) {
 }
 
 // WebRTC Functions
+function clearPeerConnectionRuntimeState(remoteSocketId) {
+    if (iceRestartTimers[remoteSocketId]) {
+        clearTimeout(iceRestartTimers[remoteSocketId]);
+        delete iceRestartTimers[remoteSocketId];
+    }
+    delete iceRestartAttempts[remoteSocketId];
+    delete iceRestartLocks[remoteSocketId];
+    delete makingOffers[remoteSocketId];
+    delete ignoreIncomingOffers[remoteSocketId];
+    delete settingRemoteAnswerPending[remoteSocketId];
+    delete seenRemoteCandidates[remoteSocketId];
+}
+
+function isPolitePeer(remoteSocketId) {
+    if (!socket || !socket.id) return true;
+    return socket.id.localeCompare(remoteSocketId) > 0;
+}
+
+function optimizeSenderParameters(pc, track = null) {
+    if (!pc) return;
+    const senders = pc.getSenders();
+    senders.forEach(sender => {
+        if (!sender || !sender.track) return;
+        if (track && sender.track.id !== track.id) return;
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+        }
+
+        if (sender.track.kind === 'audio') {
+            params.encodings[0].maxBitrate = 32000;
+        } else if (sender.track.kind === 'video') {
+            const isScreenTrack = sender.track.contentHint === 'detail';
+            params.degradationPreference = isScreenTrack ? 'maintain-resolution' : 'maintain-framerate';
+            params.encodings[0].maxBitrate = isScreenTrack ? 1400000 : 700000;
+            params.encodings[0].maxFramerate = isScreenTrack ? 20 : 24;
+            if (!sender.track.contentHint) {
+                sender.track.contentHint = 'motion';
+            }
+        }
+
+        sender.setParameters(params).catch(error => {
+            console.warn('Failed to apply sender parameters:', error.message);
+        });
+    });
+}
+
+function createAndSendOffer(remoteSocketId, options = {}) {
+    const pc = peerConnections[remoteSocketId];
+    if (!pc || pc.signalingState === 'closed') return Promise.resolve();
+    if (!socket || !socket.connected) return Promise.resolve();
+    if (pc.signalingState !== 'stable') return Promise.resolve();
+    if (makingOffers[remoteSocketId]) return Promise.resolve();
+
+    if (seenRemoteCandidates[remoteSocketId]) {
+        seenRemoteCandidates[remoteSocketId].clear();
+    }
+    ignoreIncomingOffers[remoteSocketId] = false;
+    makingOffers[remoteSocketId] = true;
+    return pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        ...options
+    })
+    .then(offer => pc.setLocalDescription(offer))
+    .then(() => {
+        socket.emit('offer', {
+            to: remoteSocketId,
+            offer: pc.localDescription,
+            from: socket.id
+        });
+    })
+    .catch(error => {
+        console.error('Error creating offer:', error);
+    })
+    .finally(() => {
+        makingOffers[remoteSocketId] = false;
+    });
+}
+
+function requestIceRestart(remoteSocketId, reason = 'unknown') {
+    const pc = peerConnections[remoteSocketId];
+    if (!pc || pc.signalingState === 'closed') return;
+    if (!socket || !socket.connected) return;
+    if (pc.signalingState !== 'stable') return;
+    if (iceRestartLocks[remoteSocketId]) return;
+
+    const attempts = iceRestartAttempts[remoteSocketId] || 0;
+    if (attempts >= 3) {
+        console.error(`ICE restart limit reached for ${remoteSocketId}`);
+        return;
+    }
+
+    iceRestartLocks[remoteSocketId] = true;
+    iceRestartAttempts[remoteSocketId] = attempts + 1;
+    console.log(`Starting ICE restart with ${remoteSocketId} (${reason}), attempt ${iceRestartAttempts[remoteSocketId]}`);
+
+    createAndSendOffer(remoteSocketId, { iceRestart: true })
+    .catch(error => {
+        console.error('Error during ICE restart:', error);
+    })
+    .finally(() => {
+        iceRestartLocks[remoteSocketId] = false;
+    });
+}
+
 function createPeerConnection(remoteSocketId, isInitiator) {
     console.log(`Creating peer connection with ${remoteSocketId}, initiator: ${isInitiator}`);
 
@@ -5672,14 +5899,25 @@ function createPeerConnection(remoteSocketId, isInitiator) {
         iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
-            // TURN сервер для лучшей совместимости
-            { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:openrelay.metered.ca:80' },
+            { urls: 'turn:openrelay.metered.ca:80?transport=udp', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
         ],
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
         iceCandidatePoolSize: 10
     });
 
     peerConnections[remoteSocketId] = pc;
+    iceRestartAttempts[remoteSocketId] = 0;
+    makingOffers[remoteSocketId] = false;
+    ignoreIncomingOffers[remoteSocketId] = false;
+    settingRemoteAnswerPending[remoteSocketId] = false;
+    seenRemoteCandidates[remoteSocketId] = new Set();
 
     // Add local stream tracks with better error handling
     if (localStream) {
@@ -5702,6 +5940,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
     } else {
         console.error('No local stream available');
     }
+    optimizeSenderParameters(pc);
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
@@ -5718,13 +5957,41 @@ function createPeerConnection(remoteSocketId, isInitiator) {
     // Handle connection state changes
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state: ${pc.iceConnectionState}`);
-        if (pc.iceConnectionState === 'failed') {
-            console.error('ICE connection failed');
-            // Try to restart ICE
-            pc.restartIce();
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+            console.error(`ICE connection issue (${pc.iceConnectionState}) with ${remoteSocketId}`);
+            if (!iceRestartTimers[remoteSocketId]) {
+                const delay = pc.iceConnectionState === 'failed' ? 300 : 1500;
+                iceRestartTimers[remoteSocketId] = setTimeout(() => {
+                    delete iceRestartTimers[remoteSocketId];
+                    requestIceRestart(remoteSocketId, pc.iceConnectionState);
+                }, delay);
+            }
         }
-        if (pc.iceConnectionState === 'connected') {
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             console.log('Peer connection established successfully!');
+            iceRestartAttempts[remoteSocketId] = 0;
+            if (iceRestartTimers[remoteSocketId]) {
+                clearTimeout(iceRestartTimers[remoteSocketId]);
+                delete iceRestartTimers[remoteSocketId];
+            }
+        }
+        if (pc.iceConnectionState === 'closed') {
+            clearPeerConnectionRuntimeState(remoteSocketId);
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed' && !iceRestartTimers[remoteSocketId]) {
+            iceRestartTimers[remoteSocketId] = setTimeout(() => {
+                delete iceRestartTimers[remoteSocketId];
+                requestIceRestart(remoteSocketId, 'connection-failed');
+            }, 300);
+        }
+        if (pc.connectionState === 'connected') {
+            iceRestartAttempts[remoteSocketId] = 0;
+        }
+        if (pc.connectionState === 'closed') {
+            clearPeerConnectionRuntimeState(remoteSocketId);
         }
     };
 
@@ -5971,28 +6238,26 @@ function createPeerConnection(remoteSocketId, isInitiator) {
 
     // Create offer if initiator with modern constraints
     if (isInitiator) {
-        pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true
-        })
-        .then(offer => {
-            console.log('Created offer with SDP:', offer.sdp.substring(0, 200));
-            return pc.setLocalDescription(offer);
-        })
-        .then(() => {
-            console.log('Sending offer to:', remoteSocketId);
-            socket.emit('offer', {
-                to: remoteSocketId,
-                offer: pc.localDescription,
-                from: socket.id // Добавляем идентификатор отправителя
-            });
-        })
-        .catch(error => {
-            console.error('Error creating offer:', error);
-        });
+        createAndSendOffer(remoteSocketId);
     }
 
     return pc;
+}
+
+function flushPendingIceCandidates(pc) {
+    if (!pc || !pc.remoteDescription || !pc.candidatesToProcess || pc.candidatesToProcess.length === 0) {
+        return;
+    }
+
+    pc.candidatesToProcess.forEach(candidate => {
+        try {
+            pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+            console.error('Error adding stored ice candidate:', e);
+        }
+    });
+
+    pc.candidatesToProcess = [];
 }
 
 // Обработчики событий WebRTC должны быть зарегистрированы после инициализации socket
@@ -6013,9 +6278,25 @@ function registerWebRTCSignalingHandlers() {
         // Get the peer connection
         const pc = peerConnections[remoteSocketId];
         if (pc) {
+            const readyForOffer = !makingOffers[remoteSocketId] &&
+                (pc.signalingState === 'stable' || settingRemoteAnswerPending[remoteSocketId]);
+            const offerCollision = !readyForOffer;
+            const politePeer = isPolitePeer(remoteSocketId);
+            ignoreIncomingOffers[remoteSocketId] = !politePeer && offerCollision;
+            if (ignoreIncomingOffers[remoteSocketId]) {
+                console.warn(`Ignoring collided offer from ${remoteSocketId}`);
+                return;
+            }
+
             // Set the remote description
             pc.setRemoteDescription(new RTCSessionDescription(data.offer))
             .then(() => {
+                ignoreIncomingOffers[remoteSocketId] = false;
+                if (seenRemoteCandidates[remoteSocketId]) {
+                    seenRemoteCandidates[remoteSocketId].clear();
+                }
+                optimizeSenderParameters(pc);
+                flushPendingIceCandidates(pc);
                 // Create answer
                 return pc.createAnswer();
             })
@@ -6038,34 +6319,45 @@ function registerWebRTCSignalingHandlers() {
 
     // Listen for remote answer
     socket.on('answer', (data) => {
-        const pc = peerConnections[data.from];
+        const remoteSocketId = data.from;
+        const pc = peerConnections[remoteSocketId];
         if (pc) {
-            console.log('Received answer from:', data.from);
+            console.log('Received answer from:', remoteSocketId);
+            settingRemoteAnswerPending[remoteSocketId] = true;
             pc.setRemoteDescription(new RTCSessionDescription(data.answer))
             .then(() => {
-                // После установки удаленного описания обрабатываем сохраненные кандидаты
-                if (pc.candidatesToProcess) {
-                    pc.candidatesToProcess.forEach(candidate => {
-                        try {
-                            pc.addIceCandidate(new RTCIceCandidate(candidate));
-                        } catch (e) {
-                            console.error('Error adding stored ice candidate:', e);
-                        }
-                    });
-                    pc.candidatesToProcess = []; // Очищаем список после обработки
+                ignoreIncomingOffers[remoteSocketId] = false;
+                if (seenRemoteCandidates[remoteSocketId]) {
+                    seenRemoteCandidates[remoteSocketId].clear();
                 }
+                optimizeSenderParameters(pc);
+                flushPendingIceCandidates(pc);
             })
             .catch(error => {
                 console.error('Error setting remote description:', error);
+            })
+            .finally(() => {
+                settingRemoteAnswerPending[remoteSocketId] = false;
             });
         }
     });
 
     // Listen for ICE candidates from remote peer
     socket.on('ice-candidate', (data) => {
-        const pc = peerConnections[data.from];
+        const remoteSocketId = data.from;
+        const pc = peerConnections[remoteSocketId];
         if (pc) {
-            console.log('Received ICE candidate from:', data.from);
+            if (ignoreIncomingOffers[remoteSocketId]) {
+                return;
+            }
+            console.log('Received ICE candidate from:', remoteSocketId);
+            const candidateKey = `${data.candidate?.candidate || ''}|${data.candidate?.sdpMid || ''}|${data.candidate?.sdpMLineIndex || ''}|${data.candidate?.usernameFragment || data.candidate?.ufrag || ''}`;
+            if (seenRemoteCandidates[remoteSocketId] && seenRemoteCandidates[remoteSocketId].has(candidateKey)) {
+                return;
+            }
+            if (seenRemoteCandidates[remoteSocketId]) {
+                seenRemoteCandidates[remoteSocketId].add(candidateKey);
+            }
             // Проверяем, что удаленный дескриптор уже установлен
             if (pc.remoteDescription) {
                 try {
@@ -6091,6 +6383,7 @@ function registerWebRTCSignalingHandlers() {
         // Закрываем соединение с этим пользователем
         if (peerConnections[socketId]) {
             peerConnections[socketId].close();
+            clearPeerConnectionRuntimeState(socketId);
             delete peerConnections[socketId];
         }
         
@@ -7396,6 +7689,7 @@ function restoreVoiceMessageHandlers() {
 // Функция для выхода из голосового канала и корректного завершения соединений
 function leaveVoiceChannel(isCalledFromRemote = false) {
     console.log('Leaving voice channel...');
+    cleanupScreenAudioMix();
 
     // Если это не вызвано удаленно, уведомляем других участников о выходе
     if (!isCalledFromRemote && socket && socket.connected) {
@@ -7410,6 +7704,7 @@ function leaveVoiceChannel(isCalledFromRemote = false) {
         if (pc) {
             pc.close();
         }
+        clearPeerConnectionRuntimeState(socketId);
         delete peerConnections[socketId];
     });
 
