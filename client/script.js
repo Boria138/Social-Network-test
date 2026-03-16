@@ -1180,6 +1180,8 @@ function createChannelMessageElement(msg) {
     const div = document.createElement('div');
     div.className = 'message';
     div.setAttribute('data-message-id', msg.id);
+    const messageContent = typeof msg.content === 'string' ? msg.content : '';
+    const hasMessageContent = messageContent.trim().length > 0;
     
     const timestamp = new Date(msg.created_at).toLocaleString('ru-RU', {
         day: 'numeric',
@@ -1220,7 +1222,7 @@ function createChannelMessageElement(msg) {
                 <span class="message-time">${timestamp}</span>
             </div>
             ${replyHTML}
-            <div class="message-text">${escapeHtml(msg.content)}</div>
+            ${hasMessageContent ? `<div class="message-text">${escapeHtml(messageContent)}</div>` : ''}
             ${fileHTML}
             <div class="message-reactions"></div>
         </div>
@@ -2484,24 +2486,30 @@ function addMessageToUI(message) {
     pinIndicator.textContent = '📌 ' + (window.i18n ? window.i18n.t('message.pinned') : 'Pinned');
     pinIndicator.style.display = message.pinned ? 'inline-flex' : 'none';
 
-    const text = document.createElement('div');
-    text.className = 'message-text';
+    const rawMessageText = typeof message.text === 'string' ? message.text : '';
+    const shouldRenderText = rawMessageText.trim().length > 0 || Boolean(message.edited);
+    let text = null;
 
-    if (isUserMessage) {
-        text.classList.add('user-message-text');
+    if (shouldRenderText) {
+        text = document.createElement('div');
+        text.className = 'message-text';
+
+        if (isUserMessage) {
+            text.classList.add('user-message-text');
+        }
+
+        // Process the message text to handle quotes
+        let processedText = formatQuotedText(rawMessageText);
+
+        // Add edited indicator if message was edited
+        if (message.edited) {
+            processedText += ' <span class="edited-indicator">' + (window.i18n ? window.i18n.t('message.edited') : '(edited)') + '</span>';
+        }
+
+        // Set the HTML content to display formatted quotes
+        text.innerHTML = processedText;
+        text.setAttribute('data-raw-text', rawMessageText);
     }
-
-    // Process the message text to handle quotes
-    let processedText = formatQuotedText(message.text);
-
-    // Add edited indicator if message was edited
-    if (message.edited) {
-        processedText += ' <span class="edited-indicator">' + (window.i18n ? window.i18n.t('message.edited') : '(edited)') + '</span>';
-    }
-
-    // Set the HTML content to display formatted quotes
-    text.innerHTML = processedText;
-    text.setAttribute('data-raw-text', message.text || '');
 
     // Add reply block if this message is a reply to another message
     let replyBlock = null;
@@ -2557,7 +2565,9 @@ function addMessageToUI(message) {
         content.appendChild(replyBlock);
     }
     content.appendChild(header);
-    content.appendChild(text);
+    if (text) {
+        content.appendChild(text);
+    }
 
     // Handle voice messages separately from file attachments
     if (message.isVoiceMessage && message.file) {
@@ -3215,7 +3225,9 @@ function addMessageToUI(message) {
     header.appendChild(timestamp);
     header.appendChild(pinIndicator);
     content.appendChild(header);
-    content.appendChild(text);
+    if (text) {
+        content.appendChild(text);
+    }
 
     // Create a container for reactions
     const reactionsAndActionsContainer = document.createElement('div');
@@ -3293,7 +3305,9 @@ function addMessageToUI(message) {
 
     // Add link previews for URLs in the message
     const messageId = message.id || Date.now();
-    addLinkPreviews(messageId, message.text, text);
+    if (text && rawMessageText.trim()) {
+        addLinkPreviews(messageId, rawMessageText, text);
+    }
 
     // Restore voice message handlers after adding the message
     setTimeout(() => {
