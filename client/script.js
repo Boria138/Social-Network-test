@@ -2564,10 +2564,6 @@ function addMessageToUI(message) {
     if (replyBlock) {
         content.appendChild(replyBlock);
     }
-    content.appendChild(header);
-    if (text) {
-        content.appendChild(text);
-    }
 
     // Handle voice messages separately from file attachments
     if (message.isVoiceMessage && message.file) {
@@ -3590,11 +3586,9 @@ async function forwardMessage(message) {
     const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
     const textElement = messageElement?.querySelector('.message-text');
     const rawText = textElement?.getAttribute('data-raw-text');
-    let forwardText = rawText !== null && rawText !== undefined ? rawText : (message.text || '');
-    if (message.file?.url) {
-        forwardText = forwardText ? `${forwardText}\n${message.file.url}` : message.file.url;
-    }
-    if (!forwardText) return;
+    const forwardText = rawText !== null && rawText !== undefined ? rawText : (message.text || '');
+    const hasFileAttachment = Boolean(message.file && message.file.url);
+    if (!forwardText.trim() && !hasFileAttachment) return;
 
     const friends = Array.isArray(window.lastLoadedFriends) ? window.lastLoadedFriends : [];
     const recipients = [
@@ -3618,8 +3612,10 @@ async function forwardMessage(message) {
     const forwardedFromLabel = window.i18n ? window.i18n.t('chat.forwardedFrom') : 'Forwarded from';
     const authorLabel = window.i18n ? window.i18n.t('chat.originalAuthor') : 'Author';
     const forwardedTitle = window.i18n ? window.i18n.t('chat.forwardedMessage') : 'Forwarded message';
-
-    const preparedForwardText = `↗ ${forwardedTitle}\n${forwardedFromLabel}: ${sourceName} • ${authorLabel}: ${authorName}\n\n${forwardText}`;
+    const forwardHeader = `↗ ${forwardedTitle}\n${forwardedFromLabel}: ${sourceName} • ${authorLabel}: ${authorName}`;
+    const preparedForwardText = forwardText.trim()
+        ? `${forwardHeader}\n\n${forwardText}`
+        : forwardHeader;
     const forwardedMessage = {
         id: Date.now(),
         text: preparedForwardText,
@@ -3627,7 +3623,9 @@ async function forwardMessage(message) {
         avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
         timestamp: new Date().toISOString(),
         reactions: [],
-        replyTo: null
+        replyTo: null,
+        file: hasFileAttachment ? message.file : null,
+        isVoiceMessage: Boolean(message.isVoiceMessage)
     };
 
     if (receiver.id === currentUser.id) {
