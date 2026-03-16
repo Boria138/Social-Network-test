@@ -2328,6 +2328,7 @@ function addMessageToUI(message) {
 
     // Set the HTML content to display formatted quotes
     text.innerHTML = processedText;
+    text.setAttribute('data-raw-text', message.text || '');
 
     // Add reply block if this message is a reply to another message
     let replyBlock = null;
@@ -3162,16 +3163,21 @@ function editMessage(message) {
     const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
     const textElement = messageElement?.querySelector('.message-text');
     
-    // Клонируем элемент чтобы удалить индикатор редактирования
+    // Берем исходный текст из data-raw-text, чтобы не терять markdown/форматирование
     let currentText = message.text;
     if (textElement) {
-        const clone = textElement.cloneNode(true);
-        // Удаляем индикатор редактирования из клона
-        const editedIndicator = clone.querySelector('.edited-indicator');
-        if (editedIndicator) {
-            editedIndicator.remove();
+        const rawText = textElement.getAttribute('data-raw-text');
+        if (rawText !== null) {
+            currentText = rawText;
+        } else {
+            const clone = textElement.cloneNode(true);
+            // Fallback для старых сообщений без data-raw-text
+            const editedIndicator = clone.querySelector('.edited-indicator');
+            if (editedIndicator) {
+                editedIndicator.remove();
+            }
+            currentText = clone.textContent;
         }
-        currentText = clone.textContent;
     }
 
     // Put the current message text in the input field
@@ -3269,6 +3275,7 @@ function updateMessageInUI(updatedMessage) {
             }
             
             messageTextElement.innerHTML = newTextContent;
+            messageTextElement.setAttribute('data-raw-text', updatedMessage.text || '');
 
             // Re-parse emojis if twemoji is available
             if (typeof twemoji !== 'undefined') {
