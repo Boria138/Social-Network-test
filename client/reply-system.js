@@ -171,12 +171,18 @@ function showReplyPreview() {
     const replyPreview = document.createElement('div');
     replyPreview.className = 'reply-preview';
     replyPreview.id = 'replyPreview';
+    const forwardedBadge = currentReplyTo.isForwarded
+        ? `<div class="reply-forward-badge">${escapeHtml(window.i18n ? window.i18n.t('chat.forwardedMessage') : 'Forwarded message')}</div>`
+        : '';
     
     replyPreview.innerHTML = `
-        <div class="reply-preview-content" onclick="scrollToMessage(${currentReplyTo.id})">
-            <span class="reply-preview-author">${escapeHtml(currentReplyTo.author)}</span>
-            <span class="reply-preview-separator">:</span>
-            <span class="reply-preview-text">${getReplyPreviewText(currentReplyTo)}</span>
+        <div class="reply-preview-main">
+            ${forwardedBadge}
+            <div class="reply-preview-content" onclick="scrollToMessage(${currentReplyTo.id})">
+                <span class="reply-preview-author">${escapeHtml(currentReplyTo.author)}</span>
+                <span class="reply-preview-separator">:</span>
+                <span class="reply-preview-text">${getReplyPreviewText(currentReplyTo)}</span>
+            </div>
         </div>
         <button class="reply-preview-cancel" onclick="cancelReply()" title="Cancel reply">×</button>
     `;
@@ -213,6 +219,14 @@ function setupCancelReplyButton() {
 
 // Получить текст превью в зависимости от типа сообщения
 function getReplyPreviewText(message) {
+    if (message.isForwarded) {
+        let forwardedText = message.text || '';
+        if (forwardedText.length > 80) {
+            forwardedText = forwardedText.substring(0, 80) + '…';
+        }
+        return forwardedText || '';
+    }
+
     if (message.isVoiceMessage) {
         return '🎤 Голосовое сообщение';
     }
@@ -325,6 +339,7 @@ function sendMessageWithReply() {
             author: currentReplyTo.author,
             text: currentReplyTo.text,
             isVoiceMessage: currentReplyTo.isVoiceMessage,
+            isForwarded: Boolean(currentReplyTo.isForwarded),
             file: currentReplyTo.file
         } : null
     };
@@ -356,20 +371,28 @@ function sendMessageWithReply() {
 function createReplyBlockHTML(replyTo) {
     if (!replyTo) return '';
     
-    const icon = replyTo.isVoiceMessage 
+    const icon = replyTo.isForwarded
+        ? '<span class="reply-icon">↗</span>'
+        : replyTo.isVoiceMessage 
         ? '<span class="reply-voice-icon">🎤</span>'
         : replyTo.file 
             ? '<span class="reply-file-icon">📎</span>'
             : '<span class="reply-icon">↪</span>';
     
     const text = getReplyPreviewText(replyTo);
+    const forwardedBadge = replyTo.isForwarded
+        ? `<div class="reply-forward-badge">${escapeHtml(window.i18n ? window.i18n.t('chat.forwardedMessage') : 'Forwarded message')}</div>`
+        : '';
     
     return `
         <div class="message-reply-block" onclick="scrollToMessage(${replyTo.id})">
-            ${icon}
-            <span class="reply-author">${escapeHtml(replyTo.author)}</span>
-            <span class="reply-separator">:</span>
-            <span class="reply-text">${escapeHtml(text)}</span>
+            ${forwardedBadge}
+            <div class="message-reply-row">
+                ${icon}
+                <span class="reply-author">${escapeHtml(replyTo.author)}</span>
+                <span class="reply-separator">:</span>
+                <span class="reply-text">${escapeHtml(text)}</span>
+            </div>
         </div>
     `;
 }

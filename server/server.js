@@ -1055,6 +1055,7 @@ io.on('connection', async (socket) => {
                     author: message.replyTo.author,
                     text: message.replyTo.text,
                     isVoiceMessage: message.replyTo.isVoiceMessage || false,
+                    isForwarded: !!message.replyTo.isForwarded,
                     file: message.replyTo.file || null
                 };
             }

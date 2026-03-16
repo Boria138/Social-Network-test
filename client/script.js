@@ -2242,6 +2242,7 @@ function sendMessage() {
             author: currentReplyTo.author,
             text: currentReplyTo.text,
             isVoiceMessage: currentReplyTo.isVoiceMessage,
+            isForwarded: Boolean(currentReplyTo.isForwarded),
             file: currentReplyTo.file
         } : null
     };
@@ -2344,8 +2345,13 @@ function addMessageToUI(message) {
         // Determine icon based on message type
         let icon = '↪';
         let previewText = message.replyTo.text || '';
+        let forwardedBadge = '';
 
-        if (message.replyTo.isVoiceMessage) {
+        if (message.replyTo.isForwarded) {
+            icon = '↗';
+            const forwardedLabel = window.i18n ? window.i18n.t('chat.forwardedMessage') : 'Forwarded message';
+            forwardedBadge = `<div class="reply-forward-badge">${escapeHtml(forwardedLabel)}</div>`;
+        } else if (message.replyTo.isVoiceMessage) {
             icon = '🎤';
             previewText = 'Голосовое сообщение';
         } else if (message.replyTo.file) {
@@ -2364,10 +2370,13 @@ function addMessageToUI(message) {
         }
 
         replyBlock.innerHTML = `
-            <span class="reply-icon">${icon}</span>
-            <span class="reply-author">${escapeHtml(message.replyTo.author)}</span>
-            <span class="reply-separator">:</span>
-            <span class="reply-text">${escapeHtml(previewText)}</span>
+            ${forwardedBadge}
+            <div class="message-reply-row">
+                <span class="reply-icon">${icon}</span>
+                <span class="reply-author">${escapeHtml(message.replyTo.author)}</span>
+                <span class="reply-separator">:</span>
+                <span class="reply-text">${escapeHtml(previewText)}</span>
+            </div>
         `;
     }
 
@@ -3049,6 +3058,12 @@ function addMessageToUI(message) {
     replyBtn.title = 'Reply to message';
     replyBtn.onclick = () => replyToMessage(message);
 
+    const forwardBtn = document.createElement('button');
+    forwardBtn.className = 'forward-btn';
+    forwardBtn.textContent = '↗';
+    forwardBtn.title = window.i18n ? window.i18n.t('actions.forward') : 'Forward message';
+    forwardBtn.onclick = () => forwardMessage(message);
+
     // Create a container for action buttons to position them properly
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'message-actions';
@@ -3072,6 +3087,7 @@ function addMessageToUI(message) {
     }
 
     actionsContainer.appendChild(replyBtn);
+    actionsContainer.appendChild(forwardBtn);
     actionsContainer.appendChild(addReactionBtn);
     reactionsAndActionsContainer.appendChild(actionsContainer);
     content.appendChild(reactionsAndActionsContainer);
@@ -3146,6 +3162,145 @@ function replyToMessage(message) {
         if (messageInput) {
             messageInput.focus();
         }
+    }
+}
+
+function showForwardPicker(recipients) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('forwardPickerModal');
+        if (existing) {
+            existing.remove();
+        }
+
+        const title = window.i18n ? window.i18n.t('actions.forward') : 'Forward message';
+        const closeLabel = window.i18n ? window.i18n.t('actions.close') : 'Close';
+        const emptyLabel = window.i18n ? window.i18n.t('errors.noForwardChats') : 'No available chats for forwarding';
+
+        const modal = document.createElement('div');
+        modal.id = 'forwardPickerModal';
+        modal.className = 'forward-picker-modal active';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-hidden', 'false');
+
+        const listHtml = recipients.length > 0
+            ? recipients.map((recipient, index) => `
+                <button type="button" class="forward-picker-item" data-forward-index="${index}">
+                    <div class="friend-avatar">
+                        <div class="friend-avatar-content">${(recipient.avatar || recipient.username.charAt(0)).toUpperCase()}</div>
+                    </div>
+                    <span class="forward-picker-name">${escapeHtml(recipient.username)}</span>
+                </button>
+            `).join('')
+            : `<div class="forward-picker-empty">${emptyLabel}</div>`;
+
+        modal.innerHTML = `
+            <div class="forward-picker-content">
+                <div class="forward-picker-header">
+                    <h3>${escapeHtml(title)}</h3>
+                    <button type="button" class="forward-picker-close" aria-label="${escapeHtml(closeLabel)}">&times;</button>
+                </div>
+                <div class="forward-picker-list">${listHtml}</div>
+            </div>
+        `;
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                close();
+            }
+        };
+
+        const close = () => {
+            document.removeEventListener('keydown', onKeyDown);
+            modal.remove();
+            resolve(null);
+        };
+
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                close();
+            }
+        });
+
+        const closeBtn = modal.querySelector('.forward-picker-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', close);
+        }
+
+        modal.querySelectorAll('.forward-picker-item').forEach((item) => {
+            item.addEventListener('click', () => {
+                const index = Number(item.getAttribute('data-forward-index'));
+                const selected = recipients[index] || null;
+                document.removeEventListener('keydown', onKeyDown);
+                modal.remove();
+                resolve(selected);
+            });
+        });
+
+        document.addEventListener('keydown', onKeyDown);
+
+        document.body.appendChild(modal);
+    });
+}
+
+async function forwardMessage(message) {
+    const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
+    const textElement = messageElement?.querySelector('.message-text');
+    const rawText = textElement?.getAttribute('data-raw-text');
+    let forwardText = rawText !== null && rawText !== undefined ? rawText : (message.text || '');
+    if (message.file?.url) {
+        forwardText = forwardText ? `${forwardText}\n${message.file.url}` : message.file.url;
+    }
+    if (!forwardText) return;
+
+    const friends = Array.isArray(window.lastLoadedFriends) ? window.lastLoadedFriends : [];
+    const recipients = [
+        {
+            id: currentUser.id,
+            avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
+            username: window.i18n ? window.i18n.t('chat.selfChat') : 'Self Chat'
+        },
+        ...friends.map(friend => ({
+            id: friend.id,
+            avatar: friend.avatar || friend.username.charAt(0).toUpperCase(),
+            username: friend.username
+        }))
+    ];
+    const receiver = await showForwardPicker(recipients);
+    if (!receiver) return;
+
+    const sourceEl = document.querySelector('#chatHeaderInfo .channel-name');
+    const sourceName = sourceEl?.textContent?.trim() || (window.i18n ? window.i18n.t('chat.unknownSource') : 'Unknown source');
+    const authorName = message.author || (window.i18n ? window.i18n.t('chat.unknownUser') : 'Unknown');
+    const forwardedFromLabel = window.i18n ? window.i18n.t('chat.forwardedFrom') : 'Forwarded from';
+    const authorLabel = window.i18n ? window.i18n.t('chat.originalAuthor') : 'Author';
+    const forwardedTitle = window.i18n ? window.i18n.t('chat.forwardedMessage') : 'Forwarded message';
+
+    const preparedForwardText = `↗ ${forwardedTitle}\n${forwardedFromLabel}: ${sourceName} • ${authorLabel}: ${authorName}\n\n${forwardText}`;
+    const forwardedMessage = {
+        id: Date.now(),
+        text: preparedForwardText,
+        author: currentUser.username,
+        avatar: currentUser.avatar || currentUser.username.charAt(0).toUpperCase(),
+        timestamp: new Date().toISOString(),
+        reactions: [],
+        replyTo: null
+    };
+
+    if (receiver.id === currentUser.id) {
+        saveSelfMessageToHistory(forwardedMessage);
+        if (currentDMUserId === currentUser.id) {
+            addMessageToUI(forwardedMessage);
+            scrollToBottom();
+        }
+        return;
+    }
+
+    if (socket && socket.connected) {
+        socket.emit('send-dm', {
+            receiverId: receiver.id,
+            message: forwardedMessage
+        });
     }
 }
 

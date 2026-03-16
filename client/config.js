@@ -301,7 +301,16 @@ window.I18N = {
     // Additional action translations
     "actions.notifications": "Notifications",
     "actions.menu": "Menu",
-    "actions.send": "Send"
+    "actions.send": "Send",
+    "actions.forward": "Forward message",
+    "chat.forwardedMessage": "Forwarded message",
+    "chat.forwardedFrom": "Forwarded from",
+    "chat.originalAuthor": "Author",
+    "chat.forwardTo": "Forward message to:",
+    "chat.unknownSource": "Unknown source",
+    "chat.unknownUser": "Unknown",
+    "errors.noForwardChats": "No available chats for forwarding",
+    "errors.invalidRecipient": "Invalid recipient"
   },
 
   ru: {
@@ -381,6 +390,15 @@ window.I18N = {
     // Additional action translations
     "actions.notifications": "Уведомления",
     "actions.menu": "Меню",
-    "actions.send": "Отправить"
+    "actions.send": "Отправить",
+    "actions.forward": "Переслать сообщение",
+    "chat.forwardedMessage": "Пересланное сообщение",
+    "chat.forwardedFrom": "Переслано из",
+    "chat.originalAuthor": "Автор",
+    "chat.forwardTo": "Переслать сообщение в:",
+    "chat.unknownSource": "Неизвестный источник",
+    "chat.unknownUser": "Неизвестно",
+    "errors.noForwardChats": "Нет доступных чатов для пересылки",
+    "errors.invalidRecipient": "Некорректный получатель"
   }
 };

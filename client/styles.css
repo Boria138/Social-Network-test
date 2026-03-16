@@ -1692,7 +1692,6 @@ body::after{
 }
 
 .reply-preview-content {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1702,6 +1701,14 @@ body::after{
     transition: background 0.15s;
     padding: 4px 8px;
     border-radius: 6px;
+}
+
+.reply-preview-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .reply-preview-content:hover {
@@ -1753,6 +1760,105 @@ body::after{
     color: var(--text);
 }
 
+/* Forward Picker */
+.forward-picker-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+    z-index: 10010;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.forward-picker-modal.active {
+    display: flex;
+}
+
+.forward-picker-content {
+    width: 100%;
+    max-width: 420px;
+    max-height: 70vh;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--glass);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.forward-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.forward-picker-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--fg);
+}
+
+.forward-picker-close {
+    border: none;
+    background: transparent;
+    color: var(--fg);
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 6px;
+    border-radius: 6px;
+}
+
+.forward-picker-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.forward-picker-list {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(70vh - 56px);
+    overflow-y: auto;
+    padding: 8px;
+    gap: 6px;
+}
+
+.forward-picker-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: var(--fg);
+}
+
+.forward-picker-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.forward-picker-name {
+    font-size: 14px;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.forward-picker-empty {
+    color: var(--fg);
+    opacity: 0.8;
+    font-size: 14px;
+    text-align: center;
+    padding: 24px 12px;
+}
+
 /* Подсветка сообщения при переходе */
 .message-group.highlighted {
     background: rgba(var(--accent-rgb), .15);
@@ -1778,10 +1884,30 @@ body::after{
     border-radius: 0 8px 8px 0;
     cursor: pointer;
     transition: background 0.15s;
+    display: block;
+    overflow: hidden;
+}
+
+.message-reply-row {
     display: flex;
     align-items: center;
     gap: 8px;
     overflow: hidden;
+}
+
+.reply-forward-badge {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: var(--accent);
+    background: var(--accent-transparent);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 4px;
 }
 
 .message-reply-block:hover {
@@ -1827,7 +1953,7 @@ body::after{
     margin-right: 4px;
 }
 
-.reply-btn {
+.reply-btn, .forward-btn, .edit-btn, .delete-btn, .add-reaction-btn {
     background: none;
     border: 1px solid transparent;
     font-size: 16px;
@@ -1839,24 +1965,7 @@ body::after{
     color: var(--muted);
 }
 
-.reply-btn:hover {
-    background: var(--glass);
-    color: var(--text);
-}
-
-.edit-btn, .delete-btn {
-    background: none;
-    border: 1px solid transparent;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 6px 10px;
-    border-radius: 12px;
-    transition: background-color 0.2s;
-    margin-top: 8px;
-    color: var(--muted);
-}
-
-.edit-btn:hover, .delete-btn:hover {
+.reply-btn:hover, .forward-btn:hover, .edit-btn:hover, .delete-btn:hover, .add-reaction-btn:hover {
     background: var(--glass);
     color: var(--text);
 }
@@ -2818,23 +2927,6 @@ body::after{
 .reaction span {
     font-size: 12px;
     color: rgba(255,255,255,.55);
-}
-
-.add-reaction-btn {
-    background: none;
-    border: 1px solid transparent;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 6px 10px;
-    border-radius: 12px;
-    transition: background-color 0.2s;
-    margin-top: 8px;
-    color: var(--muted);
-}
-
-.add-reaction-btn:hover {
-    background: rgba(255,255,255,.06);
-    color: var(--text);
 }
 
 /* =======================================================
