@@ -16,6 +16,8 @@ let isMuted = false;
 let isDeafened = false;
 let currentUser = null;
 let socket = null;
+let socketInitAttempts = 0;
+let webrtcHandlersBound = false;
 let token = null;
 let currentView = 'friends';
 let currentDMUserId = null;
@@ -348,29 +350,40 @@ function updateUserInfo() {
 }
 
 function connectToSocketIO() {
-    if (typeof io !== 'undefined') {
-        const apiUrl = getApiUrl();
-        const socketOpts = {
-            auth: { token: token },
-            ...(window.APP_CONFIG?.SOCKET_OPTIONS || {})
-        };
-        socket = apiUrl ? io(apiUrl, socketOpts) : io(socketOpts);
-        
-        socket.on('connect', () => {
-            console.log('Connected to server');
-        });
-        
-       socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-        });
-        
-        
-        socket.on('reaction-update', (data) => {
-            updateMessageReactions(data.messageId, data.reactions);
-        });
+    if (typeof io === 'undefined') {
+        socketInitAttempts += 1;
+        if (socketInitAttempts <= 10) {
+            setTimeout(connectToSocketIO, 300);
+            return;
+        }
+        console.error('Socket.IO client is not loaded');
+        return;
+    }
 
-        // WebRTC Signaling
-        socket.on('new-dm', (data) => {
+    socketInitAttempts = 0;
+    const apiUrl = getApiUrl();
+    const socketOpts = {
+        auth: { token: token },
+        ...(window.APP_CONFIG?.SOCKET_OPTIONS || {})
+    };
+    socket = apiUrl ? io(apiUrl, socketOpts) : io(socketOpts);
+    registerWebRTCSignalingHandlers();
+    
+    socket.on('connect', () => {
+        console.log('Connected to server');
+    });
+    
+   socket.on('connect_error', (error) => {
+        console.error('Connection error:', error);
+    });
+        
+        
+    socket.on('reaction-update', (data) => {
+        updateMessageReactions(data.messageId, data.reactions);
+    });
+
+    // WebRTC Signaling
+    socket.on('new-dm', (data) => {
             // Отображаем сообщение, если оно от пользователя, с которым мы общаемся
             if (currentView === 'dm' && currentDMUserId && data.senderId === currentDMUserId) {
                 // Определяем, является ли файл голосовым сообщением
@@ -414,7 +427,7 @@ function connectToSocketIO() {
             }
         });
 
-        socket.on('dm-sent', (data) => {
+    socket.on('dm-sent', (data) => {
             // Отображаем наше сообщение, если оно было отправлено в текущий чат
             if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
                 // Определяем, является ли файл голосовым сообщением
@@ -442,7 +455,7 @@ function connectToSocketIO() {
             }
         });
 
-        socket.on('updated-dm', (data) => {
+    socket.on('updated-dm', (data) => {
             // Обновляем сообщение, если оно от пользователя, с которым мы общаемся
             if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
                 // Определяем, является ли файл голосовым сообщением
@@ -463,7 +476,7 @@ function connectToSocketIO() {
             }
         });
         
-        socket.on('dm-updated', (data) => {
+    socket.on('dm-updated', (data) => {
             // Обновляем сообщение у отправителя
             if (currentView === 'dm' && currentDMUserId && data.receiverId === currentDMUserId) {
                 // Определяем, является ли файл голосовым сообщением
@@ -484,15 +497,15 @@ function connectToSocketIO() {
             }
         });
 
-        socket.on('deleted-dm', (data) => {
+    socket.on('deleted-dm', (data) => {
             // Удаляем сообщение из UI
             if (currentView === 'dm' && currentDMUserId) {
                 deleteMessageFromUI(data.messageId);
             }
         });
 
-        // Обработка новых сообщений в канале
-        socket.on('new-channel-message', (data) => {
+    // Обработка новых сообщений в канале
+    socket.on('new-channel-message', (data) => {
             const { channelId, message } = data;
 
             // Отображаем сообщение если мы в этом канале
@@ -502,11 +515,11 @@ function connectToSocketIO() {
             }
         });
 
-        socket.on('new-friend-request', () => {
-            loadPendingRequests();
-        });
+    socket.on('new-friend-request', () => {
+        loadPendingRequests();
+    });
 
-        socket.on('incoming-call', (data) => {
+    socket.on('incoming-call', (data) => {
             const { from, type } = data;
             if (from) {
                 // Добавляем уведомление о входящем звонке
@@ -515,7 +528,7 @@ function connectToSocketIO() {
             }
         });
 
-        socket.on('call-accepted', (data) => {
+    socket.on('call-accepted', (data) => {
             console.log('Call accepted by:', data.from);
             // When call is accepted, create peer connection
             document.querySelector('.call-channel-name').textContent = `Connected with ${data.from.username}`;
@@ -528,8 +541,8 @@ function connectToSocketIO() {
             }
         });
         
-        // Обработка присоединения к существующему звонку
-        socket.on('join-existing-call', (data) => {
+    // Обработка присоединения к существующему звонку
+    socket.on('join-existing-call', (data) => {
             const { callId, participants, type } = data;
             console.log('Joining existing call:', callId);
             
@@ -540,7 +553,7 @@ function connectToSocketIO() {
             }, callId, type);
         });
 
-        socket.on('call-rejected', (data) => {
+    socket.on('call-rejected', (data) => {
             alert('Call was declined');
             // Close call interface
             const callInterface = document.getElementById('callInterface');
@@ -552,7 +565,7 @@ function connectToSocketIO() {
             inCall = false;
         });
         
-        socket.on('call-ended', (data) => {
+    socket.on('call-ended', (data) => {
             // Handle when other party ends the call
             if (peerConnections[data.from]) {
                 peerConnections[data.from].close();
@@ -567,8 +580,8 @@ function connectToSocketIO() {
             }
         });
 
-        // Обработка уведомления о пропущенном звонке (от сервера)
-        socket.on('missed-call-notification', (data) => {
+    // Обработка уведомления о пропущенном звонке (от сервера)
+    socket.on('missed-call-notification', (data) => {
             const { from, type, timestamp } = data;
             console.log('Missed call notification from server:', from);
             
@@ -580,8 +593,8 @@ function connectToSocketIO() {
             }
         });
 
-        // Обновляем список пользователей
-        socket.on('user-list-update', (usersList) => {
+    // Обновляем список пользователей
+    socket.on('user-list-update', (usersList) => {
             // Update online friends list
             const onlineList = document.getElementById('friendsOnline');
             if (onlineList) {
@@ -605,25 +618,24 @@ function connectToSocketIO() {
             });
         });
         
-        // Обработка приглашения присоединиться к звонку
-        socket.on('call-invitation', (data) => {
-            const { inviter, callId, type } = data;
-            showCallInvitation(inviter, callId, type);
-        });
-        
-        // Обработка добавления к существующему звонку
-        socket.on('add-participant-to-call', (data) => {
-            const { from, participants } = data;
-            // Обновляем список участников
-            if (window.currentCallDetails) {
-                window.currentCallDetails.participants = participants;
-            }
-            // Создаем соединение с инициатором
-            if (!peerConnections[from.socketId]) {
-                createPeerConnection(from.socketId, false); // не инициатор
-            }
-        });
-    }
+    // Обработка приглашения присоединиться к звонку
+    socket.on('call-invitation', (data) => {
+        const { inviter, callId, type } = data;
+        showCallInvitation(inviter, callId, type);
+    });
+    
+    // Обработка добавления к существующему звонку
+    socket.on('add-participant-to-call', (data) => {
+        const { from, participants } = data;
+        // Обновляем список участников
+        if (window.currentCallDetails) {
+            window.currentCallDetails.participants = participants;
+        }
+        // Создаем соединение с инициатором
+        if (!peerConnections[from.socketId]) {
+            createPeerConnection(from.socketId, false); // не инициатор
+        }
+    });
 }
 
 // Initialize friends tabs
@@ -5481,8 +5493,11 @@ function createPeerConnection(remoteSocketId, isInitiator) {
     return pc;
 }
 
-// Обработчики событий WebRTC должны быть зарегистрированы один раз при инициализации приложения
-document.addEventListener('DOMContentLoaded', () => {
+// Обработчики событий WebRTC должны быть зарегистрированы после инициализации socket
+function registerWebRTCSignalingHandlers() {
+    if (!socket || webrtcHandlersBound) return;
+    webrtcHandlersBound = true;
+
     // Listen for remote offer (when someone calls us)
     socket.on('offer', (data) => {
         console.log('Received offer from:', data.from);
@@ -5588,7 +5603,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.currentCallDetails.participants = window.currentCallDetails.participants.filter(id => id != userId);
         }
     });
-});
+}
 
 // Initialize resizable videos
 function initializeResizableVideos() {
