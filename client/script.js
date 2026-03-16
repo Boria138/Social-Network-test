@@ -6376,6 +6376,42 @@ const THEMES = {
     }
 };
 
+const DEFAULT_ACCENT_PALETTE = ['#8b5cf6', '#60a5fa', '#34d399', '#fbbf24', '#f87171', '#ec4899'];
+const THEME_ACCENT_DEFAULTS = {
+    highContrast: '#fbbf24',
+    deuteranopia: '#60a5fa',
+    tritanopia: '#34d399'
+};
+const THEME_ACCENT_PALETTES = {
+    highContrast: ['#fbbf24', '#38bdf8', '#f43f5e', '#22d3ee', '#ffffff', '#f97316'],
+    deuteranopia: ['#60a5fa', '#eab308', '#38bdf8', '#f59e0b', '#a78bfa', '#f472b6'],
+    tritanopia: ['#34d399', '#f59e0b', '#ef4444', '#84cc16', '#f97316', '#facc15']
+};
+
+function getThemeAccent(themeName) {
+    const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+    if (THEME_ACCENT_DEFAULTS[themeName]) {
+        const themePalette = THEME_ACCENT_PALETTES[themeName] || DEFAULT_ACCENT_PALETTE;
+        if (themePalette.includes(savedAccent)) return savedAccent;
+        return THEME_ACCENT_DEFAULTS[themeName];
+    }
+    return savedAccent;
+}
+
+function getAccentPalette(themeName) {
+    return THEME_ACCENT_PALETTES[themeName] || DEFAULT_ACCENT_PALETTE;
+}
+
+function updateAccentPalette(themeName) {
+    const accentColors = document.querySelectorAll('.accent-color');
+    const palette = getAccentPalette(themeName);
+    accentColors.forEach((color, index) => {
+        const nextColor = palette[index] || DEFAULT_ACCENT_PALETTE[index] || palette[0];
+        color.dataset.accent = nextColor;
+        color.style.backgroundColor = nextColor;
+    });
+}
+
 // Initialize theme system
 function initializeThemeSystem() {
     // Load saved theme and accent color from localStorage
@@ -6394,11 +6430,12 @@ function initializeThemeSystem() {
         localStorage.setItem('selectedTheme', 'default');
     }
     
-    const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+    const savedAccent = getThemeAccent(savedTheme);
     const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
     
     // Apply saved theme
     applyTheme(savedTheme);
+    updateAccentPalette(savedTheme);
     
     // Wait a moment for theme to apply, then apply accent color and transparency
     setTimeout(() => {
@@ -6434,9 +6471,8 @@ function applyTheme(themeName) {
     updateTransparency(savedTransparency);
     
     // Reapply accent color to ensure all elements update properly
-    const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
     setTimeout(() => {
-        applyAccentColor(savedAccent);
+        applyAccentColor(getThemeAccent(themeName));
     }, 30); // Small delay to ensure theme is applied first
 }
 
@@ -6603,7 +6639,8 @@ function setupThemeSelector() {
         
         // Update custom color picker value from saved accent
         if (customColorPicker) {
-            const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+            const currentTheme = localStorage.getItem('selectedTheme') || 'default';
+            const savedAccent = getThemeAccent(currentTheme);
             customColorPicker.value = savedAccent;
         }
     });
@@ -6620,11 +6657,15 @@ function setupThemeSelector() {
     themeOptions.forEach(option => {
         option.addEventListener('click', () => {
             const themeName = option.dataset.theme;
-            applyTheme(themeName);
-            highlightSelectedTheme(themeName);
-            
-            // Save selected theme to localStorage
             localStorage.setItem('selectedTheme', themeName);
+
+            const themeAccent = getThemeAccent(themeName);
+            applyTheme(themeName);
+            updateAccentPalette(themeName);
+            highlightSelectedTheme(themeName);
+            highlightSelectedAccent(themeAccent);
+            localStorage.setItem('selectedAccent', themeAccent);
+            if (customColorPicker) customColorPicker.value = themeAccent;
             
             // Force update transparency after theme change
             const savedTransparency = localStorage.getItem('transparencyLevel') || 86;
@@ -6667,7 +6708,8 @@ function setupThemeSelector() {
     // Custom color picker
     if (customColorPicker) {
         // Load saved accent color
-        const savedAccent = localStorage.getItem('selectedAccent') || '#8b5cf6';
+        const currentTheme = localStorage.getItem('selectedTheme') || 'default';
+        const savedAccent = getThemeAccent(currentTheme);
         customColorPicker.value = savedAccent;
     }
     
