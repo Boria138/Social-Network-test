@@ -43,6 +43,9 @@ let twemojiObserver = null;
 let twemojiParseTimer = null;
 const twemojiPendingNodes = new Set();
 let isTwemojiParsing = false;
+let uploadInFlightCount = 0;
+let currentUploadKind = 'file';
+let currentUploadLabel = '';
 
 // Variables for voice recording
 let isRecording = false;
@@ -2246,6 +2249,115 @@ function initializeMessageInput() {
     });
 }
 
+function getUploadStatusElement() {
+    const messageInputContainer = document.querySelector('.message-input-container');
+    if (!messageInputContainer) return null;
+
+    const existingStatusEl = document.getElementById('uploadStatusIndicator');
+    if (existingStatusEl) return existingStatusEl;
+
+    const statusEl = document.createElement('div');
+    statusEl.id = 'uploadStatusIndicator';
+    statusEl.className = 'upload-status';
+    statusEl.innerHTML = `
+        <div class="upload-status-head">
+            <span class="upload-status-text"></span>
+            <span class="upload-status-percent">0%</span>
+        </div>
+        <div class="upload-status-track">
+            <div class="upload-status-fill"></div>
+        </div>
+    `;
+    messageInputContainer.appendChild(statusEl);
+    return statusEl;
+}
+
+function updateUploadProgress(percent) {
+    const statusEl = getUploadStatusElement();
+    if (!statusEl) return;
+
+    const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+    const fillEl = statusEl.querySelector('.upload-status-fill');
+    const percentEl = statusEl.querySelector('.upload-status-percent');
+    if (fillEl) fillEl.style.width = `${safePercent}%`;
+    if (percentEl) percentEl.textContent = `${safePercent}%`;
+}
+
+function setUploadState(active, kind = 'file', label = '') {
+    if (active) {
+        uploadInFlightCount += 1;
+        currentUploadKind = kind;
+        currentUploadLabel = label || '';
+    } else {
+        uploadInFlightCount = Math.max(0, uploadInFlightCount - 1);
+    }
+
+    const statusEl = getUploadStatusElement();
+    const attachBtn = document.querySelector('.attach-btn');
+    const voiceRecordBtn = document.getElementById('voiceRecordBtn');
+    const isUploading = uploadInFlightCount > 0;
+
+    if (attachBtn) attachBtn.disabled = isUploading;
+    if (voiceRecordBtn) voiceRecordBtn.disabled = isUploading;
+
+    if (!statusEl) return;
+
+    if (!isUploading) {
+        statusEl.classList.remove('is-visible');
+        const textEl = statusEl.querySelector('.upload-status-text');
+        if (textEl) textEl.textContent = '';
+        updateUploadProgress(0);
+        return;
+    }
+
+    const statusKey = currentUploadKind === 'voice'
+        ? 'upload.voiceInProgress'
+        : 'upload.fileInProgress';
+    const statusText = window.i18n ? window.i18n.t(statusKey) : (currentUploadKind === 'voice' ? 'Uploading voice message...' : 'Uploading file...');
+    const statusLabel = currentUploadLabel ? `${statusText} ${currentUploadLabel}` : statusText;
+    const textEl = statusEl.querySelector('.upload-status-text');
+    if (textEl) textEl.textContent = statusLabel;
+    updateUploadProgress(0);
+    statusEl.classList.add('is-visible');
+}
+
+async function uploadWithProgress(formData, onProgress) {
+    return await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${getApiUrl()}/api/upload`, true);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+        xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable || typeof onProgress !== 'function') return;
+            const percent = (event.loaded / event.total) * 100;
+            onProgress(percent);
+        };
+
+        xhr.onload = () => {
+            let parsed = null;
+            try {
+                parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+            } catch (error) {
+                parsed = null;
+            }
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(parsed);
+                return;
+            }
+
+            const errorMessage = parsed && parsed.error ? parsed.error : 'Upload failed';
+            reject(new Error(errorMessage));
+        };
+
+        xhr.onerror = () => {
+            reject(new Error('Upload failed'));
+        };
+
+        xhr.send(formData);
+    });
+}
+
 // Voice recording functions
 function isValidAudioDuration(duration) {
     return Number.isFinite(duration) && duration > 0;
@@ -2576,6 +2688,7 @@ function updateRecordingUI(show) {
 }
 
 async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
+    let fileName = '';
     try {
         // Determine file extension using centralized function
         let fileExtension = getFileExtensionFromMime(mimeType);
@@ -2590,7 +2703,8 @@ async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
         }
 
         // Create a unique filename with voice prefix
-        const fileName = `voice_message_${Date.now()}.${fileExtension}`;
+        fileName = `voice_message_${Date.now()}.${fileExtension}`;
+        setUploadState(true, 'voice', fileName);
 
         // Create form data to send the audio file
         const formData = new FormData();
@@ -2600,19 +2714,7 @@ async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
         formData.append('isVoiceMessage', 'true'); // Flag to identify voice messages
         formData.append('folder', 'voice_messages'); // Specify the folder for voice messages
 
-        const response = await fetch(`${getApiUrl()}/api/upload`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Upload failed');
-        }
-
-        const fileData = await response.json();
+        const fileData = await uploadWithProgress(formData, updateUploadProgress);
 
         // Create message object with voice file
         const message = {
@@ -2644,6 +2746,8 @@ async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
     } catch (error) {
         console.error('Error sending voice message:', error);
         alert(window.i18n ? window.i18n.t('errors.voiceSendFailed') : 'Failed to send voice message');
+    } finally {
+        setUploadState(false, 'voice');
     }
 }
 
@@ -5351,25 +5455,14 @@ function initializeFileUpload() {
 }
 
 async function uploadFile(file) {
+    setUploadState(true, 'file', file.name);
     try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('dmId', currentDMUserId); // Добавляем ID получателя для DM
         formData.append('senderId', currentUser.id); // Добавляем ID отправителя
 
-        const response = await fetch(`${getApiUrl()}/api/upload`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Upload failed');
-        }
-
-        const fileData = await response.json();
+        const fileData = await uploadWithProgress(formData, updateUploadProgress);
 
         const message = {
             id: Date.now(), // используем временную метку как ID
@@ -5399,6 +5492,8 @@ async function uploadFile(file) {
     } catch (error) {
         console.error('Upload error:', error);
         alert(window.i18n ? window.i18n.t('errors.uploadFailed') : 'Failed to upload file');
+    } finally {
+        setUploadState(false, 'file');
     }
 }
 

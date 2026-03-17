@@ -413,7 +413,9 @@ window.I18N = {
     "errors.transcribeFailed": "Failed to transcribe",
     "errors.sendRequestFailed": "Failed to send request",
     "voice.releaseToSend": "Release to send voice message",
-    "voice.clickToSeek": "Click to seek"
+    "voice.clickToSeek": "Click to seek",
+    "upload.fileInProgress": "Uploading file...",
+    "upload.voiceInProgress": "Uploading voice message..."
   },
 
   ru: {
@@ -605,6 +607,8 @@ window.I18N = {
     "errors.transcribeFailed": "Не удалось распознать аудио",
     "errors.sendRequestFailed": "Не удалось отправить запрос",
     "voice.releaseToSend": "Отпустите, чтобы отправить голосовое сообщение",
-    "voice.clickToSeek": "Нажмите для перемотки"
+    "voice.clickToSeek": "Нажмите для перемотки",
+    "upload.fileInProgress": "Загрузка файла...",
+    "upload.voiceInProgress": "Загрузка голосового сообщения..."
   }
 };
