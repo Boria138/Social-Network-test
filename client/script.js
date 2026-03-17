@@ -46,6 +46,7 @@ let isTwemojiParsing = false;
 let uploadInFlightCount = 0;
 let currentUploadKind = 'file';
 let currentUploadLabel = '';
+let currentChatSearchQuery = '';
 
 // Variables for voice recording
 let isRecording = false;
@@ -166,6 +167,7 @@ function initializeApp() {
     updateUserInfo();
     initializeFriendsTabs();
     initializeMessageInput();
+    initializeChatSearch();
     initializeUserControls();
     initializeCallControls();
     initializeFileUpload();
@@ -1159,6 +1161,15 @@ function addNewsMessageToUI(message) {
     if (addReactionBtn) {
         addReactionBtn.onclick = () => showEmojiPickerForMessage(message.id);
     }
+
+    const newsTextEl = div.querySelector('.message-text');
+    if (newsTextEl) {
+        applyHashtagLinks(newsTextEl);
+    }
+
+    if (currentChatSearchQuery.trim()) {
+        applyChatSearchFilter(currentChatSearchQuery);
+    }
     
     // Применяем Twemoji к сообщению
     if (typeof twemoji !== 'undefined') {
@@ -1258,6 +1269,10 @@ function displayChannelMessages(messages) {
         const messageEl = createChannelMessageElement(msg);
         messagesContainer.appendChild(messageEl);
     });
+
+    if (currentChatSearchQuery.trim()) {
+        applyChatSearchFilter(currentChatSearchQuery);
+    }
     
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     
@@ -1329,6 +1344,11 @@ function createChannelMessageElement(msg) {
                 <span class="reaction" data-emoji="${reaction.emoji}">${reaction.emoji} ${reaction.count}</span>
             `;
         });
+    }
+
+    const channelTextEl = div.querySelector('.message-text');
+    if (channelTextEl) {
+        applyHashtagLinks(channelTextEl);
     }
     
     return div;
@@ -2249,6 +2269,234 @@ function initializeMessageInput() {
     });
 }
 
+function initializeChatSearch() {
+    const searchInput = document.getElementById('chatSearchInput');
+    const clearBtn = document.getElementById('chatSearchClearBtn');
+    if (!searchInput || !clearBtn) return;
+
+    searchInput.addEventListener('input', () => {
+        setChatSearchQuery(searchInput.value || '');
+    });
+
+    clearBtn.addEventListener('click', () => {
+        setChatSearchQuery('');
+        searchInput.focus();
+    });
+
+    setChatSearchQuery(currentChatSearchQuery || '');
+
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (messagesContainer) {
+        messagesContainer.addEventListener('click', (event) => {
+            const hashtagEl = event.target.closest('.hashtag-link');
+            if (!hashtagEl) return;
+            event.preventDefault();
+            const hashtag = hashtagEl.getAttribute('data-hashtag') || hashtagEl.textContent || '';
+            if (!hashtag) return;
+            setChatSearchQuery(hashtag.startsWith('#') ? hashtag : `#${hashtag}`);
+        });
+    }
+}
+
+function setChatSearchQuery(query) {
+    const searchInput = document.getElementById('chatSearchInput');
+    const clearBtn = document.getElementById('chatSearchClearBtn');
+    const nextQuery = String(query || '');
+
+    if (searchInput && searchInput.value !== nextQuery) {
+        searchInput.value = nextQuery;
+    }
+
+    currentChatSearchQuery = nextQuery;
+    applyChatSearchFilter(nextQuery);
+
+    if (clearBtn) {
+        clearBtn.style.visibility = nextQuery.trim() ? 'visible' : 'hidden';
+    }
+}
+
+function applyHashtagLinks(root) {
+    if (!root) return;
+
+    const hashtagRegex = /#[A-Za-z0-9_\-\u0400-\u04FF]+/g;
+    const textNodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue || !node.nodeValue.includes('#')) return NodeFilter.FILTER_REJECT;
+            const parentEl = node.parentElement;
+            if (!parentEl) return NodeFilter.FILTER_REJECT;
+            if (parentEl.closest('a, pre, code, .md-code-block, .hashtag-link')) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    });
+
+    while (walker.nextNode()) {
+        textNodes.push(walker.currentNode);
+    }
+
+    textNodes.forEach((node) => {
+        const text = node.nodeValue || '';
+        hashtagRegex.lastIndex = 0;
+        if (!hashtagRegex.test(text)) return;
+
+        const fragment = document.createDocumentFragment();
+        let lastIndex = 0;
+        hashtagRegex.lastIndex = 0;
+        let match = hashtagRegex.exec(text);
+
+        while (match) {
+            const hashtag = match[0];
+            const index = match.index;
+            const prevChar = index > 0 ? text[index - 1] : '';
+            const isBoundary = !prevChar || /\s|[\(\[\{>"'.,!?;:]/.test(prevChar);
+            if (!isBoundary) {
+                match = hashtagRegex.exec(text);
+                continue;
+            }
+
+            if (index > lastIndex) {
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex, index)));
+            }
+
+            const link = document.createElement('a');
+            link.href = '#';
+            link.className = 'hashtag-link';
+            link.setAttribute('data-hashtag', hashtag);
+            link.textContent = hashtag;
+            fragment.appendChild(link);
+            lastIndex = index + hashtag.length;
+
+            match = hashtagRegex.exec(text);
+        }
+
+        if (lastIndex < text.length) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+
+        if (node.parentNode) {
+            node.parentNode.replaceChild(fragment, node);
+        }
+    });
+}
+
+function escapeSearchRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function clearChatSearchHighlights() {
+    const container = document.getElementById('messagesContainer');
+    if (!container) return;
+
+    container.querySelectorAll('.search-highlight').forEach((highlightEl) => {
+        const parent = highlightEl.parentNode;
+        if (!parent) return;
+        parent.replaceChild(document.createTextNode(highlightEl.textContent || ''), highlightEl);
+        parent.normalize();
+    });
+}
+
+function highlightTextInElement(root, regex) {
+    if (!root || !regex) return;
+
+    const textNodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+            if (node.parentElement && node.parentElement.closest('.search-highlight')) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    });
+
+    while (walker.nextNode()) {
+        textNodes.push(walker.currentNode);
+    }
+
+    textNodes.forEach((node) => {
+        const text = node.nodeValue || '';
+        regex.lastIndex = 0;
+        if (!regex.test(text)) return;
+
+        const fragment = document.createDocumentFragment();
+        let lastIndex = 0;
+        regex.lastIndex = 0;
+        let match = regex.exec(text);
+
+        while (match) {
+            const matchIndex = match.index;
+            const matchText = match[0];
+            if (matchIndex > lastIndex) {
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex, matchIndex)));
+            }
+
+            const mark = document.createElement('mark');
+            mark.className = 'search-highlight';
+            mark.textContent = matchText;
+            fragment.appendChild(mark);
+            lastIndex = matchIndex + matchText.length;
+
+            if (matchText.length === 0) break;
+            match = regex.exec(text);
+        }
+
+        if (lastIndex < text.length) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+
+        if (node.parentNode) {
+            node.parentNode.replaceChild(fragment, node);
+        }
+    });
+}
+
+function applyChatSearchFilter(query) {
+    const container = document.getElementById('messagesContainer');
+    if (!container) return;
+
+    const normalizedQuery = String(query || '').trim().toLowerCase();
+    const messages = container.querySelectorAll(':scope > .message-group, :scope > .message');
+
+    clearChatSearchHighlights();
+
+    if (!normalizedQuery) {
+        messages.forEach((messageEl) => {
+            messageEl.classList.remove('search-hidden');
+        });
+        return;
+    }
+
+    const hashtagRegex = /#[A-Za-z0-9_\-\u0400-\u04FF]+/g;
+    let highlightRegex = null;
+
+    messages.forEach((messageEl) => {
+        const textContent = (messageEl.textContent || '').toLowerCase();
+        let isMatch = false;
+
+        if (normalizedQuery.startsWith('#')) {
+            const hashtagQuery = normalizedQuery.slice(1).trim();
+            if (!hashtagQuery) {
+                isMatch = hashtagRegex.test(textContent);
+                hashtagRegex.lastIndex = 0;
+                highlightRegex = /#[A-Za-z0-9_\-\u0400-\u04FF]+/g;
+            } else {
+                const hashtagToken = `#${hashtagQuery}`;
+                isMatch = textContent.includes(hashtagToken);
+                highlightRegex = new RegExp(escapeSearchRegExp(hashtagToken), 'gi');
+            }
+        } else {
+            isMatch = textContent.includes(normalizedQuery);
+            highlightRegex = new RegExp(escapeSearchRegExp(normalizedQuery), 'gi');
+        }
+
+        messageEl.classList.toggle('search-hidden', !isMatch);
+        if (!isMatch || !highlightRegex) return;
+
+        const highlightTargets = messageEl.querySelectorAll('.message-text, .reply-text, .message-author, .file-info, .file-link, .file-content-preview');
+        highlightTargets.forEach((target) => {
+            highlightTextInElement(target, highlightRegex);
+        });
+    });
+}
+
 function getUploadStatusElement() {
     const messageInputContainer = document.querySelector('.message-input-container');
     if (!messageInputContainer) return null;
@@ -2901,6 +3149,7 @@ function addMessageToUI(message) {
         // Set the HTML content to display formatted quotes
         text.innerHTML = processedText;
         text.setAttribute('data-raw-text', rawMessageText);
+        applyHashtagLinks(text);
     }
 
     // Add reply block if this message is a reply to another message
@@ -3698,6 +3947,10 @@ function addMessageToUI(message) {
     setTimeout(() => {
         restoreVoiceMessageHandlers();
     }, 0);
+
+    if (currentChatSearchQuery.trim()) {
+        applyChatSearchFilter(currentChatSearchQuery);
+    }
 }
 
 function ensurePinnedMessagesBlock() {
@@ -4212,6 +4465,7 @@ function updateMessageInUI(updatedMessage) {
             
             messageTextElement.innerHTML = newTextContent;
             messageTextElement.setAttribute('data-raw-text', updatedMessage.text || '');
+            applyHashtagLinks(messageTextElement);
 
             // Re-parse emojis if twemoji is available
             if (typeof twemoji !== 'undefined') {
@@ -4221,6 +4475,10 @@ function updateMessageInUI(updatedMessage) {
             // Re-highlight code blocks with Prism.js
             if (typeof Prism !== 'undefined') {
                 Prism.highlightAllUnder(messageTextElement);
+            }
+
+            if (currentChatSearchQuery.trim()) {
+                applyChatSearchFilter(currentChatSearchQuery);
             }
         }
     }
