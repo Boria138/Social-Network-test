@@ -316,7 +316,8 @@ function renderNotificationsList() {
     const notifications = notificationService?.getNotifications() || [];
     
     if (notifications.length === 0) {
-        container.innerHTML = '<div class="notifications-panel-empty">Нет уведомлений</div>';
+        const emptyNotifications = window.i18n ? window.i18n.t('notifications.empty') : 'No notifications';
+        container.innerHTML = `<div class="notifications-panel-empty">${emptyNotifications}</div>`;
         return;
     }
     
@@ -327,7 +328,13 @@ function renderNotificationsList() {
         const isRead = notif.read ? '' : 'unread';
         
         if (notif.type === 'missed-call') {
-            const callType = notif.callType === 'video' ? 'Видео' : 'Голосовой';
+            const callType = notif.callType === 'video'
+                ? (window.i18n ? window.i18n.t('call.missedType.video') : 'Video')
+                : (window.i18n ? window.i18n.t('call.missedType.audio') : 'Audio');
+            const missedCallTextTemplate = window.i18n ? window.i18n.t('call.missedCall') : 'Missed {type} call';
+            const missedCallText = missedCallTextTemplate.replace('{type}', callType);
+            const callBackText = window.i18n ? window.i18n.t('actions.callBack') : 'Call back';
+            const dismissText = window.i18n ? window.i18n.t('actions.dismiss') : 'Dismiss';
             html += `
                 <div class="notification-item ${isRead}">
                     <div class="notification-item-icon missed-call">📞</div>
@@ -336,10 +343,10 @@ function renderNotificationsList() {
                             <span class="notification-item-title">${notif.username}</span>
                             <span class="notification-item-time">${timeAgo}</span>
                         </div>
-                        <div class="notification-item-text">Пропущенный ${callType} звонок</div>
+                        <div class="notification-item-text">${missedCallText}</div>
                         <div class="notification-item-actions">
-                            <button class="call-back" onclick="callUser('${notif.userId}', '${notif.callType}')">Перезвонить</button>
-                            <button class="dismiss" onclick="dismissNotification('${notif.userId}')">Скрыть</button>
+                            <button class="call-back" onclick="callUser('${notif.userId}', '${notif.callType}')">${callBackText}</button>
+                            <button class="dismiss" onclick="dismissNotification('${notif.userId}')">${dismissText}</button>
                         </div>
                     </div>
                 </div>
@@ -366,10 +373,17 @@ function renderNotificationsList() {
 function getTimeAgo(date) {
     const seconds = Math.floor((new Date() - date) / 1000);
     
-    if (seconds < 60) return 'Только что';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} мин. назад`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)} ч. назад`;
-    return `${Math.floor(seconds / 86400)} дн. назад`;
+    if (seconds < 60) return window.i18n ? window.i18n.t('time.justNow') : 'Just now';
+    if (seconds < 3600) {
+        const minutesAgo = window.i18n ? window.i18n.t('time.minutesAgo') : '{count} min ago';
+        return minutesAgo.replace('{count}', String(Math.floor(seconds / 60)));
+    }
+    if (seconds < 86400) {
+        const hoursAgo = window.i18n ? window.i18n.t('time.hoursAgo') : '{count} h ago';
+        return hoursAgo.replace('{count}', String(Math.floor(seconds / 3600)));
+    }
+    const daysAgo = window.i18n ? window.i18n.t('time.daysAgo') : '{count} d ago';
+    return daysAgo.replace('{count}', String(Math.floor(seconds / 86400)));
 }
 
 function addMessageNotification(sender, messageText, isDM = true) {
@@ -400,8 +414,11 @@ function addCallNotification(fromUser, callType = 'voice') {
     if (!notificationService) return;
     
     // Показываем браузерное уведомление
-    notificationService.showBrowserNotification('Входящий звонок', {
-        body: `${fromUser.username} звонит вам`,
+    const incomingCallTitle = window.i18n ? window.i18n.t('call.incoming') : 'Incoming call';
+    const incomingCallBodyTemplate = window.i18n ? window.i18n.t('call.isCallingYou') : '{username} is calling you';
+    const incomingCallBody = incomingCallBodyTemplate.replace('{username}', fromUser.username);
+    notificationService.showBrowserNotification(incomingCallTitle, {
+        body: incomingCallBody,
         requireInteraction: true,
         tag: 'incoming-call'
     });
@@ -514,7 +531,8 @@ function connectToSocketIO() {
                     username: data.message.author,
                     avatar: data.message.avatar
                 };
-                const messageText = data.message.text || (data.message.file ? '📎 Вложение' : '');
+                const attachmentLabel = window.i18n ? window.i18n.t('chat.attachment') : 'Attachment';
+                const messageText = data.message.text || (data.message.file ? `📎 ${attachmentLabel}` : '');
                 addMessageNotification(sender, messageText, true);
                 
                 // Принудительно обновляем бейдж сразу после добавления уведомления
@@ -637,7 +655,8 @@ function connectToSocketIO() {
     socket.on('call-accepted', (data) => {
             console.log('Call accepted by:', data.from);
             // When call is accepted, create peer connection
-            document.querySelector('.call-channel-name').textContent = `Connected with ${data.from.username}`;
+            const connectedWithLabel = window.i18n ? window.i18n.t('chat.connectedWith') : 'Connected with';
+            document.querySelector('.call-channel-name').textContent = `${connectedWithLabel} ${data.from.username}`;
 
             // Create peer connection - для инициатора вызова создаем как инициатора, для принимающего - как не-инициатора
             if (!peerConnections[data.from.socketId]) {
@@ -655,12 +674,13 @@ function connectToSocketIO() {
             // Присоединяемся к существующему звонку
             joinExistingCall({
                 id: participants.find(id => id !== currentUser.id), // Находим другого участника
-                username: 'Participant' // Временное имя, нужно получить настоящее
+                username: window.i18n ? window.i18n.t('chat.participant') : 'Participant' // Временное имя, нужно получить настоящее
             }, callId, type);
         });
 
     socket.on('call-rejected', (data) => {
-            alert('Call was declined');
+            const callDeclinedMessage = window.i18n ? window.i18n.t('call.declined') : 'Call was declined';
+            alert(callDeclinedMessage);
             // Close call interface
             const callInterface = document.getElementById('callInterface');
             callInterface.classList.add('hidden');
@@ -710,7 +730,8 @@ function connectToSocketIO() {
                 const onlineFriends = usersList.filter(f => f.status === 'Online');
                 
                 if (onlineFriends.length === 0) {
-                    onlineList.innerHTML = '<div class="friends-empty">No one is online</div>';
+                    const noOneOnlineText = window.i18n ? window.i18n.t('friends.noOneOnline') : 'No one is online';
+                    onlineList.innerHTML = `<div class="friends-empty">${noOneOnlineText}</div>`;
                 } else {
                     onlineFriends.forEach(friend => {
                         onlineList.appendChild(createFriendItem(friend));
@@ -853,12 +874,12 @@ async function loadNewsReactionsFromServer(newsIds) {
 
 // Преобразование новости в сообщение канала
 function newsToChannelMessage(news) {
-    const title = news.title || `Версия ${news.version}`;
+    const title = news.title || `Version ${news.version}`;
     const content = `**${title}**\n\n${news.changes.map(c => `• ${c}`).join('\n')}`;
     return {
         id: `news-${news.id}`,
         content: content,
-        username: 'Система',
+        username: window.i18n ? window.i18n.t('chat.systemUser') : 'System',
         avatar: '📢',
         created_at: news.date + 'T00:00:00.000Z',
         file: null,
@@ -866,6 +887,28 @@ function newsToChannelMessage(news) {
         replyTo: null,
         isNews: true
     };
+}
+
+function formatSubscribersCount(count) {
+    const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+    const lang = window.i18n && typeof window.i18n.getLang === 'function' ? window.i18n.getLang() : 'en';
+
+    if (lang === 'ru') {
+        const mod10 = safeCount % 10;
+        const mod100 = safeCount % 100;
+        let key = 'chat.subscriber.many';
+        if (mod10 === 1 && mod100 !== 11) {
+            key = 'chat.subscriber.one';
+        } else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+            key = 'chat.subscriber.few';
+        }
+        const word = window.i18n ? window.i18n.t(key) : 'подписчиков';
+        return `${safeCount} ${word}`;
+    }
+
+    const enKey = safeCount === 1 ? 'chat.subscriber.one' : 'chat.subscriber.many';
+    const enWord = window.i18n ? window.i18n.t(enKey) : (safeCount === 1 ? 'subscriber' : 'subscribers');
+    return `${safeCount} ${enWord}`;
 }
 
 // Открытие системного канала (аналогично startSelfChat)
@@ -876,7 +919,9 @@ async function openSystemChannel() {
     }
     
     currentView = 'channel';
-    currentChannel = { id: systemChannelId, name: 'Новости', type: 'system' };
+    const newsChannelName = window.i18n ? window.i18n.t('chat.news') : 'News';
+    const loadingText = window.i18n ? window.i18n.t('chat.loading') : 'Loading...';
+    currentChannel = { id: systemChannelId, name: newsChannelName, type: 'system' };
     hidePinnedMessageBanner();
     
     const friendsView = document.getElementById('friendsView');
@@ -889,7 +934,10 @@ async function openSystemChannel() {
     if (friendsView) friendsView.style.display = 'none';
     if (chatView) chatView.style.display = 'flex';
     if (dmListView) dmListView.style.display = 'block';
-    if (serverName) serverName.textContent = 'Новости';
+    if (serverName) {
+        serverName.setAttribute('data-i18n', 'chat.news');
+        serverName.textContent = newsChannelName;
+    }
     if (chatHeaderInfo) {
         chatHeaderInfo.innerHTML = `
             <div class="channel-icon" style="margin-right: 8px;">
@@ -898,10 +946,13 @@ async function openSystemChannel() {
                 </svg>
             </div>
             <div style="display: flex; flex-direction: column;">
-                <span class="channel-name">Новости</span>
-                <span class="channel-subscribers" style="font-size: 12px; color: rgba(255,255,255,0.5);">Загрузка...</span>
+                <span class="channel-name" data-i18n="chat.news">${newsChannelName}</span>
+                <span class="channel-subscribers" data-i18n="chat.loading" style="font-size: 12px; color: rgba(255,255,255,0.5);">${loadingText}</span>
             </div>
         `;
+        if (window.i18n && typeof window.i18n.applyI18n === 'function') {
+            window.i18n.applyI18n(chatHeaderInfo);
+        }
     }
     
     // Скрываем поле ввода сообщений (новости только для чтения)
@@ -917,7 +968,7 @@ async function openSystemChannel() {
     // Загружаем новости и количество подписчиков
     const messageInput = document.getElementById('messageInput');
     if (messageInput) {
-        messageInput.placeholder = 'Новости только для чтения';
+        messageInput.placeholder = window.i18n ? window.i18n.t('chat.newsReadOnly') : 'News is read-only';
     }
     
     // Загружаем количество подписчиков
@@ -928,8 +979,9 @@ async function openSystemChannel() {
         if (response.ok) {
             const channel = await response.json();
             const subscribersEl = document.querySelector('.channel-subscribers');
-            if (subscribersEl && channel.subscriberCount) {
-                subscribersEl.textContent = `${channel.subscriberCount}${getSubscriberCountSuffix(channel.subscriberCount)}`;
+            if (subscribersEl && channel && channel.subscriberCount !== undefined && channel.subscriberCount !== null) {
+                subscribersEl.setAttribute('data-subscriber-count', String(channel.subscriberCount));
+                subscribersEl.textContent = formatSubscribersCount(channel.subscriberCount);
             }
         }
     } catch (error) {
@@ -941,23 +993,6 @@ async function openSystemChannel() {
     setTimeout(() => {
         scrollToBottom();
     }, 100);
-}
-
-// Склонение слова "подписчик"
-function getSubscriberCountSuffix(count) {
-    const lastDigit = count % 10;
-    const lastTwoDigits = count % 100;
-    
-    if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
-        return ' подписчиков';
-    }
-    if (lastDigit === 1) {
-        return ' подписчик';
-    }
-    if (lastDigit >= 2 && lastDigit <= 4) {
-        return ' подписчика';
-    }
-    return ' подписчиков';
 }
 
 // Загрузка сообщений системного канала (аналогично loadSelfChatHistory)
@@ -1014,7 +1049,8 @@ async function loadSystemChannelMessages() {
         });
     } catch (error) {
         console.error('Error loading system channel messages:', error);
-        messagesContainer.innerHTML = '<div class="error-messages">Ошибка загрузки новостей</div>';
+        const newsLoadFailed = window.i18n ? window.i18n.t('errors.newsLoadFailed') : 'Failed to load news';
+        messagesContainer.innerHTML = `<div class="error-messages">${newsLoadFailed}</div>`;
     }
 }
 
@@ -1049,7 +1085,7 @@ function addNewsMessageToUI(message) {
             <div class="reactions-and-actions-container">
                 <div class="message-reactions"></div>
                 <div class="message-actions">
-                    <button class="add-reaction-btn" title="Add reaction">😊</button>
+                    <button class="add-reaction-btn" title="${window.i18n ? window.i18n.t('actions.emoji') : 'Add reaction'}">😊</button>
                 </div>
             </div>
         </div>
@@ -1120,12 +1156,15 @@ function prependSystemChannelToDMList() {
                 <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
             </svg>
         </div>
-        <span class="channel-name">Новости</span>
+        <span class="channel-name" data-i18n="chat.news">${window.i18n ? window.i18n.t('chat.news') : 'News'}</span>
     `;
     systemChannelEl.addEventListener('click', () => {
         console.log('System channel clicked');
         openSystemChannel();
     });
+    if (window.i18n && typeof window.i18n.applyI18n === 'function') {
+        window.i18n.applyI18n(systemChannelEl);
+    }
 
     // Вставляем после self-chat (первый элемент)
     const selfChat = dmList.querySelector('.self-chat-icon');
@@ -1161,7 +1200,8 @@ function displayChannelMessages(messages) {
     messagesContainer.innerHTML = '';
     
     if (messages.length === 0) {
-        messagesContainer.innerHTML = '<div class="no-messages">No messages yet. Be the first to say hello!</div>';
+        const noMessagesText = window.i18n ? window.i18n.t('chat.noMessagesYet') : 'No messages yet. Be the first to say hello!';
+        messagesContainer.innerHTML = `<div class="no-messages">${noMessagesText}</div>`;
         return;
     }
     
@@ -1174,7 +1214,8 @@ function displayChannelMessages(messages) {
     
     // Обновляем placeholder
     if (messageInput) {
-        messageInput.placeholder = `Message #${currentChannel?.name || 'channel'}...`;
+        const messageToChannelText = window.i18n ? window.i18n.t('chat.messageToChannel') : 'Message';
+        messageInput.placeholder = `${messageToChannelText} #${currentChannel?.name || 'channel'}...`;
     }
 }
 
@@ -1272,15 +1313,17 @@ function displayFriends(friends) {
     allList.innerHTML = '';
     
     if (friends.length === 0) {
-        onlineList.innerHTML = '<div class="friends-empty">No friends yet</div>';
-        allList.innerHTML = '<div class="friends-empty">No friends yet</div>';
+        const noFriendsYetText = window.i18n ? window.i18n.t('friends.noFriendsYet') : 'No friends yet';
+        onlineList.innerHTML = `<div class="friends-empty">${noFriendsYetText}</div>`;
+        allList.innerHTML = `<div class="friends-empty">${noFriendsYetText}</div>`;
         return;
     }
     
     const onlineFriends = friends.filter(f => f.status === 'Online');
     
     if (onlineFriends.length === 0) {
-        onlineList.innerHTML = '<div class="friends-empty">No one is online</div>';
+        const noOneOnlineText = window.i18n ? window.i18n.t('friends.noOneOnline') : 'No one is online';
+        onlineList.innerHTML = `<div class="friends-empty">${noOneOnlineText}</div>`;
     } else {
         onlineFriends.forEach(friend => {
             onlineList.appendChild(createFriendItem(friend));
@@ -1295,6 +1338,12 @@ function displayFriends(friends) {
 function createFriendItem(friend) {
     const div = document.createElement('div');
     div.className = 'friend-item';
+    const friendStatus = String(friend.status || '');
+    const friendStatusText = friendStatus === 'Online'
+        ? (window.i18n ? window.i18n.t('status.online') : 'Online')
+        : (friendStatus === 'Offline'
+            ? (window.i18n ? window.i18n.t('status.offline') : 'Offline')
+            : friendStatus);
 
     div.innerHTML = `
         <div class="friend-avatar">
@@ -1302,13 +1351,13 @@ function createFriendItem(friend) {
         </div>
         <div class="friend-info">
             <div class="friend-name">${friend.username}</div>
-            <div class="friend-status ${friend.status === 'Online' ? '' : 'offline'}">${friend.status}</div>
+            <div class="friend-status ${friend.status === 'Online' ? '' : 'offline'}">${friendStatusText}</div>
         </div>
         <div class="friend-actions">
-            <button class="friend-action-btn message" title="Message">💬</button>
-            <button class="friend-action-btn audio-call" title="Audio Call">📞</button>
-            <button class="friend-action-btn video-call" title="Video Call">📹</button>
-            <button class="friend-action-btn remove" title="Remove">🗑️</button>
+            <button class="friend-action-btn message" title="${window.i18n ? window.i18n.t('chat.messageTo') : 'Message'}">💬</button>
+            <button class="friend-action-btn audio-call" title="${window.i18n ? window.i18n.t('call.missedType.audio') : 'Audio'}">📞</button>
+            <button class="friend-action-btn video-call" title="${window.i18n ? window.i18n.t('call.missedType.video') : 'Video'}">📹</button>
+            <button class="friend-action-btn remove" title="${window.i18n ? window.i18n.t('actions.delete') : 'Remove'}">🗑️</button>
         </div>
     `;
 
@@ -1348,7 +1397,8 @@ function displaySearchResults(users) {
     resultsDiv.innerHTML = '';
     
     if (users.length === 0) {
-        resultsDiv.innerHTML = '<div class="friends-empty">No users found</div>';
+        const noUsersFoundText = window.i18n ? window.i18n.t('friends.noUsersFound') : 'No users found';
+        resultsDiv.innerHTML = `<div class="friends-empty">${noUsersFoundText}</div>`;
         return;
     }
     
@@ -1363,7 +1413,7 @@ function displaySearchResults(users) {
             <div class="user-info">
                 <div class="user-name">${user.username}</div>
             </div>
-            <button class="add-friend-btn" onclick="sendFriendRequest(${user.id})">Add Friend</button>
+            <button class="add-friend-btn" onclick="sendFriendRequest(${user.id})">${window.i18n ? window.i18n.t('friends.add') : 'Add Friend'}</button>
         `;
         
         resultsDiv.appendChild(div);
@@ -1382,14 +1432,14 @@ window.sendFriendRequest = async function(friendId) {
         });
         
         if (response.ok) {
-            alert('Friend request sent!');
+            alert(window.i18n ? window.i18n.t('friends.requestSent') : 'Friend request sent!');
         } else {
             const error = await response.json();
-            alert(error.error || 'Failed to send request');
+            alert(error.error || (window.i18n ? window.i18n.t('errors.sendRequestFailed') : 'Failed to send request'));
         }
     } catch (error) {
         console.error('Error sending friend request:', error);
-        alert('Failed to send friend request');
+        alert(window.i18n ? window.i18n.t('friends.sendRequestFailed') : 'Failed to send friend request');
     }
 };
 
@@ -1404,7 +1454,8 @@ async function loadPendingRequests() {
         pendingList.innerHTML = '';
         
         if (requests.length === 0) {
-            pendingList.innerHTML = '<div class="friends-empty">No pending requests</div>';
+            const noPendingRequestsText = window.i18n ? window.i18n.t('friends.noPendingRequests') : 'No pending requests';
+            pendingList.innerHTML = `<div class="friends-empty">${noPendingRequestsText}</div>`;
             return;
         }
         
@@ -1418,11 +1469,11 @@ async function loadPendingRequests() {
                 </div>
                 <div class="friend-info">
                     <div class="friend-name">${request.username}</div>
-                    <div class="friend-status">Incoming Friend Request</div>
+                    <div class="friend-status">${window.i18n ? window.i18n.t('friends.incomingRequest') : 'Incoming Friend Request'}</div>
                 </div>
                 <div class="friend-actions">
-                    <button class="friend-action-btn accept" onclick="acceptFriendRequest(${request.id})" aria-label="Accept">${ICON_SVG.check}</button>
-                    <button class="friend-action-btn reject" onclick="rejectFriendRequest(${request.id})" aria-label="Reject">${ICON_SVG.close}</button>
+                    <button class="friend-action-btn accept" onclick="acceptFriendRequest(${request.id})" aria-label="${window.i18n ? window.i18n.t('call.accept') : 'Accept'}">${ICON_SVG.check}</button>
+                    <button class="friend-action-btn reject" onclick="rejectFriendRequest(${request.id})" aria-label="${window.i18n ? window.i18n.t('call.decline') : 'Reject'}">${ICON_SVG.close}</button>
                 </div>
             `;
             
@@ -1473,7 +1524,7 @@ window.rejectFriendRequest = async function(friendId) {
 };
 
 window.removeFriend = async function(friendId) {
-    if (!confirm('Are you sure you want to remove this friend?')) return;
+    if (!confirm(window.i18n ? window.i18n.t('friends.removeConfirm') : 'Are you sure you want to remove this friend?')) return;
 
     try {
         const response = await fetch(`/api/friends/${friendId}`, {
@@ -1607,7 +1658,7 @@ async function initiateCall(friendId, type) {
 
     } catch (error) {
         console.error('Error initiating call:', error);
-        alert('Failed to access camera/microphone. Please check permissions.');
+        alert(window.i18n ? window.i18n.t('call.accessDenied') : 'Failed to access camera/microphone. Please check permissions.');
     }
 }
 
@@ -1785,7 +1836,9 @@ async function joinExistingCall(inviter, callId, type) {
         const callInterface = document.getElementById('callInterface');
         callInterface.classList.remove('hidden');
 
-        document.querySelector('.call-channel-name').textContent = `Joined call with ${inviter.username || 'Participant'}`;
+        const joinedCallWithLabel = window.i18n ? window.i18n.t('chat.joinedCallWith') : 'Joined call with';
+        const participantLabel = inviter.username || (window.i18n ? window.i18n.t('chat.participant') : 'Participant');
+        document.querySelector('.call-channel-name').textContent = `${joinedCallWithLabel} ${participantLabel}`;
 
         const localVideo = document.getElementById('localVideo');
         updateLocalVideoPreview(localVideo, localStream);
@@ -1818,7 +1871,7 @@ async function joinExistingCall(inviter, callId, type) {
 
     } catch (error) {
         console.error('Error joining call:', error);
-        alert('Failed to access camera/microphone. Please check permissions.');
+        alert(window.i18n ? window.i18n.t('call.accessDenied') : 'Failed to access camera/microphone. Please check permissions.');
     }
 }
 
@@ -1841,7 +1894,8 @@ async function acceptCall(caller, type) {
         const callInterface = document.getElementById('callInterface');
         callInterface.classList.remove('hidden');
         
-        document.querySelector('.call-channel-name').textContent = `Call with ${caller.username}`;
+        const callWithLabel = window.i18n ? window.i18n.t('chat.callWith') : 'Call with';
+        document.querySelector('.call-channel-name').textContent = `${callWithLabel} ${caller.username}`;
         
         const localVideo = document.getElementById('localVideo');
         updateLocalVideoPreview(localVideo, localStream);
@@ -1897,7 +1951,7 @@ async function acceptCall(caller, type) {
         
     } catch (error) {
         console.error('Error accepting call:', error);
-        alert('Failed to access camera/microphone. Please check permissions.');
+        alert(window.i18n ? window.i18n.t('call.accessDenied') : 'Failed to access camera/microphone. Please check permissions.');
     }
 }
 
@@ -1962,7 +2016,8 @@ window.startDM = async function(friendId, friendUsername) {
 
     const messageInput = document.getElementById('messageInput');
     if (messageInput) {
-        messageInput.placeholder = `Message @${friendUsername}`;
+        const messageToText = window.i18n ? window.i18n.t('chat.messageTo') : 'Message';
+        messageInput.placeholder = `${messageToText} @${friendUsername}`;
     }
 
     await loadDMHistory(friendId);
@@ -2011,7 +2066,7 @@ function startSelfChat() {
 
     const messageInput = document.getElementById('messageInput');
     if (messageInput) {
-        messageInput.placeholder = `Message yourself...`;
+        messageInput.placeholder = window.i18n ? window.i18n.t('chat.messageYourself') : 'Message yourself...';
     }
 
     loadSelfChatHistory();
@@ -2096,7 +2151,10 @@ function showFriendsView() {
     if (friendsView) friendsView.style.display = 'flex';
     if (chatView) chatView.style.display = 'none';
     if (dmListView) dmListView.style.display = 'block';
-    if (serverName) serverName.textContent = 'Friends';
+    if (serverName) {
+        serverName.setAttribute('data-i18n', 'nav.friends');
+        serverName.textContent = window.i18n ? window.i18n.t('nav.friends') : 'Friends';
+    }
     if (friendsBtn) friendsBtn.classList.add('active');
     
     // Показываем поле ввода
@@ -2384,7 +2442,7 @@ async function startRecording() {
         console.log('Recording started with MIME type:', mimeType);
     } catch (error) {
         console.error('Error starting recording:', error);
-        alert('Could not access microphone. Please check permissions.');
+        alert(window.i18n ? window.i18n.t('call.micAccessDenied') : 'Could not access microphone. Please check permissions.');
     }
 }
 
@@ -2430,8 +2488,9 @@ function updateRecordingUI(show) {
     if (show) {
         // Add recording class to change icon via CSS
         voiceRecordBtn.classList.add('recording');
-        voiceRecordBtn.title = 'Release to send voice message';
-        voiceRecordBtn.setAttribute('aria-label', 'Release to send voice message');
+        const releaseToSendVoiceMessage = window.i18n ? window.i18n.t('voice.releaseToSend') : 'Release to send voice message';
+        voiceRecordBtn.title = releaseToSendVoiceMessage;
+        voiceRecordBtn.setAttribute('aria-label', releaseToSendVoiceMessage);
 
         // Create recording timer element
         const timerElement = document.createElement('div');
@@ -2538,7 +2597,7 @@ async function sendVoiceMessage(audioBlob, mimeType = 'audio/webm') {
         }
     } catch (error) {
         console.error('Error sending voice message:', error);
-        alert('Failed to send voice message');
+        alert(window.i18n ? window.i18n.t('errors.voiceSendFailed') : 'Failed to send voice message');
     }
 }
 
@@ -2716,10 +2775,11 @@ function addMessageToUI(message) {
             forwardedBadge = `<div class="reply-forward-badge">${escapeHtml(forwardedLabel)}</div>`;
         } else if (message.replyTo.isVoiceMessage) {
             icon = '🎤';
-            previewText = 'Голосовое сообщение';
+            previewText = window.i18n ? window.i18n.t('chat.voiceMessage') : 'Voice message';
         } else if (message.replyTo.file) {
             icon = '📎';
-            previewText = `Файл: ${message.replyTo.file.filename}`;
+            const fileLabel = window.i18n ? window.i18n.t('chat.fileLabel') : 'File';
+            previewText = `${fileLabel}: ${message.replyTo.file.filename}`;
         } else {
             // Strip markdown for preview
             previewText = previewText
@@ -2763,7 +2823,7 @@ function addMessageToUI(message) {
         waveformContainer.style.background = 'var(--glass)';
         waveformContainer.style.borderRadius = '10px';
         waveformContainer.style.cursor = 'pointer';
-        waveformContainer.title = 'Click to seek';
+        waveformContainer.title = window.i18n ? window.i18n.t('voice.clickToSeek') : 'Click to seek';
 
         // Create waveform bars container
         const waveformBars = document.createElement('div');
@@ -3002,7 +3062,8 @@ function addMessageToUI(message) {
                 }, 2000);
             } catch (error) {
                 console.error('[Transcribe] Error transcribing voice message:', error);
-                alert('Failed to transcribe: ' + error.message);
+                const transcribeFailed = window.i18n ? window.i18n.t('errors.transcribeFailed') : 'Failed to transcribe';
+                alert(`${transcribeFailed}: ${error.message}`);
                 transcribeBtn.innerHTML = ICON_SVG.close;
                 setTimeout(() => {
                     transcribeBtn.innerHTML = transcribeIcon;
@@ -3302,7 +3363,7 @@ function addMessageToUI(message) {
             // Create a link to download/view the full file
             const fileLink = document.createElement('a');
             fileLink.href = message.file.url;
-            fileLink.textContent = 'Download/View Full File';
+            fileLink.textContent = window.i18n ? window.i18n.t('actions.downloadViewFile') : 'Download/View Full File';
             fileLink.target = '_blank';
             fileLink.rel = 'noopener noreferrer';
             fileLink.style.display = 'inline-block';
@@ -3334,7 +3395,7 @@ function addMessageToUI(message) {
                 })
                 .catch(error => {
                     console.error('Could not load file preview:', error);
-                    fileContentPreview.textContent = '[Unable to load preview]';
+                    fileContentPreview.textContent = window.i18n ? window.i18n.t('chat.filePreviewFailed') : '[Unable to load preview]';
                 });
 
             fileDiv.appendChild(filePreview);
@@ -3392,7 +3453,7 @@ function addMessageToUI(message) {
     const addReactionBtn = document.createElement('button');
     addReactionBtn.className = 'add-reaction-btn';
     addReactionBtn.textContent = '😊';
-    addReactionBtn.title = 'Add reaction';
+    addReactionBtn.title = window.i18n ? window.i18n.t('actions.emoji') : 'Add reaction';
     addReactionBtn.onclick = () => showEmojiPickerForMessage(message.id || Date.now());
 
     header.appendChild(author);
@@ -3412,7 +3473,7 @@ function addMessageToUI(message) {
     const replyBtn = document.createElement('button');
     replyBtn.className = 'reply-btn';
     replyBtn.textContent = '↪';  // Right arrow for reply
-    replyBtn.title = 'Reply to message';
+    replyBtn.title = window.i18n ? window.i18n.t('actions.reply') : 'Reply to message';
     replyBtn.onclick = () => replyToMessage(message);
 
     const forwardBtn = document.createElement('button');
@@ -3442,13 +3503,13 @@ function addMessageToUI(message) {
         const editBtn = document.createElement('button');
         editBtn.className = 'edit-btn';
         editBtn.textContent = '✏️';  // Pencil emoji for edit
-        editBtn.title = 'Edit message';
+        editBtn.title = window.i18n ? window.i18n.t('actions.edit') : 'Edit message';
         editBtn.onclick = () => editMessage(message);
 
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
         deleteBtn.textContent = '🗑️';  // Trash emoji for delete
-        deleteBtn.title = 'Delete message';
+        deleteBtn.title = window.i18n ? window.i18n.t('actions.delete') : 'Delete message';
         deleteBtn.onclick = () => deleteMessage(message.id);
 
         actionsContainer.appendChild(editBtn);
@@ -3914,7 +3975,7 @@ function updateMessage(messageId, newText) {
 
 // Function to delete a message
 function deleteMessage(messageId) {
-    if (!confirm('Are you sure you want to delete this message?')) return;
+    if (!confirm(window.i18n ? window.i18n.t('message.deleteConfirm') : 'Are you sure you want to delete this message?')) return;
 
     // Delete from UI immediately
     deleteMessageFromUI(messageId);
@@ -4647,7 +4708,7 @@ function createLinkPreviewCard(metadata, messageId, url) {
     const hideBtn = document.createElement('button');
     hideBtn.className = 'link-preview-hide';
     hideBtn.innerHTML = ICON_SVG.close;
-    hideBtn.title = 'Hide preview';
+    hideBtn.title = window.i18n ? window.i18n.t('actions.hidePreview') : 'Hide preview';
     hideBtn.onclick = () => hideLinkPreview(messageId, url);
     
     const previewDiv = document.createElement('div');
@@ -5291,7 +5352,7 @@ async function uploadFile(file) {
 
     } catch (error) {
         console.error('Upload error:', error);
-        alert('Failed to upload file');
+        alert(window.i18n ? window.i18n.t('errors.uploadFailed') : 'Failed to upload file');
     }
 }
 
@@ -5428,13 +5489,13 @@ function initializeSettingsModal() {
         clearHiddenPreviewsBtn.addEventListener('click', () => {
             hiddenPreviews.clear();
             localStorage.removeItem('hiddenPreviews');
-            alert('All hidden previews have been reset');
+            alert(window.i18n ? window.i18n.t('settings.hiddenPreviewsReset') : 'All hidden previews have been reset');
         });
     }
     
     if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
-            if (confirm('Do you want to logout?')) {
+            if (confirm(window.i18n ? window.i18n.t('settings.logoutConfirm') : 'Do you want to logout?')) {
                 if (inCall) leaveVoiceChannel();
                 localStorage.removeItem('token');
                 localStorage.removeItem('currentUser');
@@ -5531,7 +5592,7 @@ function initializeCallControls() {
         // Обновляем подсказку для кнопки в зависимости от устройства
         const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         if (isMobile) {
-            toggleScreenBtn.title = 'Share Camera (Mobile)';
+            toggleScreenBtn.title = window.i18n ? window.i18n.t('call.screenShareCamera') : 'Share Camera (Mobile)';
             // Меняем иконку или текст, если необходимо
             const icon = toggleScreenBtn.querySelector('i') || toggleScreenBtn.querySelector('span');
             if (icon) {
@@ -5686,7 +5747,7 @@ async function toggleScreenShare() {
         } catch (error) {
             console.error('Error sharing screen:', error);
             if (error.name === 'NotAllowedError') {
-                alert('Screen sharing permission denied');
+                alert(window.i18n ? window.i18n.t('call.screenDenied') : 'Screen sharing permission denied');
             } else if (error.name === 'NotFoundError' || error.name === 'OverconstrainedError') {
                 // На мобильных устройствах может не быть внешней камеры
                 try {
@@ -5742,10 +5803,10 @@ async function toggleScreenShare() {
                     updateCallButtons();
                 } catch (fallbackError) {
                     console.error('Error with fallback camera access:', fallbackError);
-                    alert('Screen sharing is not supported on this device. Camera access was also denied.');
+                    alert(window.i18n ? window.i18n.t('call.screenUnsupported') : 'Screen sharing is not supported on this device. Camera access was also denied.');
                 }
             } else {
-                alert('Error sharing screen. Please try again. Note: Screen sharing may not be supported on mobile devices.');
+                alert(window.i18n ? window.i18n.t('call.screenError') : 'Error sharing screen. Please try again. Note: Screen sharing may not be supported on mobile devices.');
             }
         }
     }
@@ -5771,15 +5832,15 @@ function updateCallButtons() {
         const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         if (screenStream) {
             if (isMobile) {
-                toggleScreenBtn.title = 'Stop Camera Share';
+                toggleScreenBtn.title = window.i18n ? window.i18n.t('call.screenStopCamera') : 'Stop Camera Share';
             } else {
-                toggleScreenBtn.title = 'Stop Screen Share';
+                toggleScreenBtn.title = window.i18n ? window.i18n.t('call.screenStop') : 'Stop Screen Share';
             }
         } else {
             if (isMobile) {
-                toggleScreenBtn.title = 'Share Camera (Mobile)';
+                toggleScreenBtn.title = window.i18n ? window.i18n.t('call.screenShareCamera') : 'Share Camera (Mobile)';
             } else {
-                toggleScreenBtn.title = 'Share Screen';
+                toggleScreenBtn.title = window.i18n ? window.i18n.t('call.screenShare') : 'Share Screen';
             }
         }
     }
@@ -5994,19 +6055,22 @@ function populateDMList(friends) {
                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
                </svg>
            </div>
-           <span class="channel-name">Новости</span>
+           <span class="channel-name" data-i18n="chat.news">${window.i18n ? window.i18n.t('chat.news') : 'News'}</span>
        `;
        systemChannelEl.addEventListener('click', () => {
            console.log('System channel clicked');
            openSystemChannel();
        });
+       if (window.i18n && typeof window.i18n.applyI18n === 'function') {
+           window.i18n.applyI18n(systemChannelEl);
+       }
        dmList.appendChild(systemChannelEl);
    }
 
    if (friends.length === 0) {
        const emptyDM = document.createElement('div');
        emptyDM.className = 'empty-dm-list';
-       emptyDM.textContent = 'No conversations yet.';
+       emptyDM.textContent = window.i18n ? window.i18n.t('chat.noConversationsYet') : 'No conversations yet.';
        dmList.appendChild(emptyDM);
        return;
    }
@@ -6277,7 +6341,7 @@ function createPeerConnection(remoteSocketId, isInitiator) {
 
             const participantName = document.createElement('div');
             participantName.className = 'participant-name';
-            participantName.textContent = 'Friend';
+            participantName.textContent = window.i18n ? window.i18n.t('chat.friend') : 'Friend';
 
             participantDiv.appendChild(remoteVideo);
             participantDiv.appendChild(participantName);
@@ -6364,9 +6428,9 @@ function createPeerConnection(remoteSocketId, isInitiator) {
             const sizeControls = document.createElement('div');
             sizeControls.className = 'video-size-controls';
             sizeControls.innerHTML = `
-                <button class="size-control-btn minimize-btn" title="Minimize">_</button>
-                <button class="size-control-btn maximize-btn" title="Maximize">□</button>
-                <button class="size-control-btn fullscreen-btn" title="Fullscreen">${ICON_SVG.fullscreen}</button>
+                <button class="size-control-btn minimize-btn" title="${window.i18n ? window.i18n.t('actions.minimize') : 'Minimize'}">_</button>
+                <button class="size-control-btn maximize-btn" title="${window.i18n ? window.i18n.t('actions.maximize') : 'Maximize'}">□</button>
+                <button class="size-control-btn fullscreen-btn" title="${window.i18n ? window.i18n.t('actions.fullscreen') : 'Fullscreen'}">${ICON_SVG.fullscreen}</button>
             `;
 
             if (!element.querySelector('.resize-handle')) {
@@ -6705,9 +6769,9 @@ function makeResizable(element) {
     const sizeControls = document.createElement('div');
     sizeControls.className = 'video-size-controls';
     sizeControls.innerHTML = `
-        <button class="size-control-btn minimize-btn" title="Minimize">_</button>
-        <button class="size-control-btn maximize-btn" title="Maximize">□</button>
-        <button class="size-control-btn fullscreen-btn" title="Fullscreen">${ICON_SVG.fullscreen}</button>
+        <button class="size-control-btn minimize-btn" title="${window.i18n ? window.i18n.t('actions.minimize') : 'Minimize'}">_</button>
+        <button class="size-control-btn maximize-btn" title="${window.i18n ? window.i18n.t('actions.maximize') : 'Maximize'}">□</button>
+        <button class="size-control-btn fullscreen-btn" title="${window.i18n ? window.i18n.t('actions.fullscreen') : 'Fullscreen'}">${ICON_SVG.fullscreen}</button>
     `;
     sizeControls.style.cssText = `
         position: absolute;
@@ -7502,6 +7566,7 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
     applyI18n(document, lang);
     updateLangButtons(lang);
+    updateDynamicI18nText();
 
     // if you render dynamic lists later, you can call this again after render
     // applyI18n(dmListContainer, lang)
@@ -7559,6 +7624,16 @@ document.addEventListener('DOMContentLoaded', initializeThemeSystem);
 
     if (ruBtn) ruBtn.addEventListener("click", () => setLang("ru"));
     if (enBtn) enBtn.addEventListener("click", () => setLang("en"));
+  }
+
+  function updateDynamicI18nText(){
+    document.querySelectorAll(".channel-subscribers[data-subscriber-count]").forEach((el) => {
+      const count = Number(el.getAttribute("data-subscriber-count"));
+      if (!Number.isFinite(count)) return;
+      if (typeof formatSubscribersCount === "function") {
+        el.textContent = formatSubscribersCount(count);
+      }
+    });
   }
 
   // expose small API

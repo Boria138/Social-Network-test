@@ -16,6 +16,10 @@
 <body>
     <div class="auth-container">
         <div class="auth-box">
+            <div class="auth-lang-switch" role="group" aria-label="Language switch">
+                <button type="button" id="langEnBtn" class="lang-btn" aria-pressed="false">EN</button>
+                <button type="button" id="langRuBtn" class="lang-btn" aria-pressed="false">RU</button>
+            </div>
             <div class="logo">
                 <!-- Voxii PNG logo (place file in your project, e.g. /assets/voxii-logo.png) -->
                 <img
@@ -26,36 +30,36 @@
                     style="display:block; margin:0 auto 12px; object-fit:contain;"
                 />
 
-                <h1>Welcome back!</h1>
-                <p>We're so excited to see you again!</p>
+                <h1 data-i18n="auth.welcomeBack">Welcome back!</h1>
+                <p data-i18n="auth.welcomeSubtitle">We're so excited to see you again!</p>
             </div>
 
             <form id="authForm">
                 <div class="form-group" id="usernameGroup">
-                    <label for="username">USERNAME</label>
+                    <label for="username" data-i18n="auth.username">USERNAME</label>
                     <input type="text" id="username" name="username" required>
                 </div>
 
                 <div class="form-group" id="emailGroup">
-                    <label for="email">EMAIL</label>
+                    <label for="email" data-i18n="auth.email">EMAIL</label>
                     <input type="email" id="email" name="email" required>
                 </div>
 
                 <div class="form-group">
-                    <label for="password">PASSWORD</label>
+                    <label for="password" data-i18n="auth.password">PASSWORD</label>
                     <input type="password" id="password" name="password" required>
                 </div>
 
                 <div class="form-group" id="confirmPasswordGroup" style="display: none;">
-                    <label for="confirmPassword">CONFIRM PASSWORD</label>
+                    <label for="confirmPassword" data-i18n="auth.confirmPassword">CONFIRM PASSWORD</label>
                     <input type="password" id="confirmPassword" name="confirmPassword">
                 </div>
 
-                <button type="submit" class="submit-btn" id="submitBtn">Log In</button>
+                <button type="submit" class="submit-btn" id="submitBtn" data-i18n="auth.loginBtn">Log In</button>
 
                 <div class="switch-mode">
-                    <span id="switchText">Need an account?</span>
-                    <a href="#" id="switchLink">Register</a>
+                    <span id="switchText" data-i18n="auth.needAccount">Need an account?</span>
+                    <a href="#" id="switchLink" data-i18n="auth.registerLink">Register</a>
                 </div>
             </form>
         </div>
