@@ -317,7 +317,8 @@ window.I18N = {
     "chat.pinnedMessages": "Pinned messages",
     "message.pinned": "Pinned",
     "errors.noForwardChats": "No available chats for forwarding",
-    "errors.invalidRecipient": "Invalid recipient"
+    "errors.invalidRecipient": "Invalid recipient",
+    "errors.voiceCorrupted": "Voice recording is corrupted. Please try again."
   },
 
   ru: {
@@ -413,6 +414,7 @@ window.I18N = {
     "chat.pinnedMessages": "Закреплённые сообщения",
     "message.pinned": "Закреплено",
     "errors.noForwardChats": "Нет доступных чатов для пересылки",
-    "errors.invalidRecipient": "Некорректный получатель"
+    "errors.invalidRecipient": "Некорректный получатель",
+    "errors.voiceCorrupted": "Голосовое сообщение повреждено. Попробуйте снова."
   }
 };

@@ -49,6 +49,9 @@ let isRecording = false;
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordingStartTime = null;
+const MIN_VOICE_BLOB_BYTES = 1024;
+const MIN_VOICE_RECORDING_MS = 250;
+const AUDIO_METADATA_TIMEOUT_MS = 5000;
 
 // Link preview settings
 let linkPreviewEnabled = true;
@@ -2140,6 +2143,164 @@ function initializeMessageInput() {
 }
 
 // Voice recording functions
+function isValidAudioDuration(duration) {
+    return Number.isFinite(duration) && duration > 0;
+}
+
+function formatAudioDuration(duration) {
+    const safeDuration = isValidAudioDuration(duration) ? duration : 0;
+    const minutes = Math.floor(safeDuration / 60);
+    const seconds = Math.floor(safeDuration % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Convert decoded audio data to a WAV blob.
+ * @param {AudioBuffer} audioBuffer
+ * @returns {Blob}
+ */
+function encodeWavFromAudioBuffer(audioBuffer) {
+    const channels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const bytesPerSample = 2;
+    const dataSize = length * channels * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    const writeString = (offset, value) => {
+        for (let i = 0; i < value.length; i += 1) {
+            view.setUint8(offset + i, value.charCodeAt(i));
+        }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * channels * bytesPerSample, true);
+    view.setUint16(32, channels * bytesPerSample, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let index = 0; index < length; index += 1) {
+        for (let channel = 0; channel < channels; channel += 1) {
+            const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(channel)[index]));
+            view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+            offset += bytesPerSample;
+        }
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
+/**
+ * Read audio metadata and return duration for a blob.
+ * @param {Blob} blob
+ * @returns {Promise<number>}
+ */
+async function getAudioDurationFromBlob(blob) {
+    return await new Promise((resolve, reject) => {
+        const audio = new Audio();
+        const objectUrl = URL.createObjectURL(blob);
+        let finished = false;
+        const timeoutId = setTimeout(() => {
+            if (finished) return;
+            finished = true;
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('Audio metadata timeout'));
+        }, AUDIO_METADATA_TIMEOUT_MS);
+
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            URL.revokeObjectURL(objectUrl);
+        };
+
+        audio.addEventListener('loadedmetadata', () => {
+            if (finished) return;
+            finished = true;
+            const duration = audio.duration;
+            cleanup();
+            resolve(duration);
+        }, { once: true });
+
+        audio.addEventListener('error', () => {
+            if (finished) return;
+            finished = true;
+            cleanup();
+            reject(new Error('Audio metadata load failed'));
+        }, { once: true });
+
+        audio.src = objectUrl;
+    });
+}
+
+/**
+ * Validate voice blob by size and finite metadata duration.
+ * @param {Blob} blob
+ * @returns {Promise<boolean>}
+ */
+async function isVoiceBlobValid(blob) {
+    if (!blob || blob.size < MIN_VOICE_BLOB_BYTES) return false;
+    try {
+        const duration = await getAudioDurationFromBlob(blob);
+        return isValidAudioDuration(duration);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Try to repair an invalid voice blob by re-encoding to WAV.
+ * @param {Blob} blob
+ * @returns {Promise<Blob|null>}
+ */
+async function tryRepairVoiceBlob(blob) {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor || !blob) return null;
+
+    const audioContext = new AudioContextCtor();
+    try {
+        const sourceBuffer = await blob.arrayBuffer();
+        const decoded = await audioContext.decodeAudioData(sourceBuffer);
+        const wavBlob = encodeWavFromAudioBuffer(decoded);
+        return wavBlob.size >= MIN_VOICE_BLOB_BYTES ? wavBlob : null;
+    } catch (error) {
+        console.warn('Voice blob repair failed:', error);
+        return null;
+    } finally {
+        await audioContext.close();
+    }
+}
+
+/**
+ * Prepare a safe voice blob for upload.
+ * @param {Blob} audioBlob
+ * @param {string} mimeType
+ * @param {number} recordingMs
+ * @returns {Promise<{blob: Blob, mimeType: string}|null>}
+ */
+async function prepareVoiceBlobForUpload(audioBlob, mimeType, recordingMs) {
+    if (!audioBlob || audioBlob.size === 0) return null;
+    if (recordingMs < MIN_VOICE_RECORDING_MS && audioBlob.size < MIN_VOICE_BLOB_BYTES) return null;
+
+    if (await isVoiceBlobValid(audioBlob)) {
+        return { blob: audioBlob, mimeType };
+    }
+
+    const repairedBlob = await tryRepairVoiceBlob(audioBlob);
+    if (!repairedBlob) return null;
+    if (!(await isVoiceBlobValid(repairedBlob))) return null;
+
+    return { blob: repairedBlob, mimeType: 'audio/wav' };
+}
+
 async function startRecording() {
     try {
         // Request access to microphone with specific constraints for Firefox Android
@@ -2155,21 +2316,23 @@ async function startRecording() {
         // Determine best supported MIME type
         let mimeType = 'audio/webm';
         let mimeTypeOptions = { mimeType: 'audio/webm' };
-        
-        // Firefox Android works better with audio/ogg
+
         if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
-            if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-                mimeType = 'audio/ogg;codecs=opus';
-                mimeTypeOptions = { mimeType: 'audio/ogg;codecs=opus' };
-            } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-                mimeType = 'audio/webm;codecs=opus';
-                mimeTypeOptions = { mimeType: 'audio/webm;codecs=opus' };
-            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-                mimeType = 'audio/webm';
-                mimeTypeOptions = { mimeType: 'audio/webm' };
-            } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-                mimeType = 'audio/ogg';
-                mimeTypeOptions = { mimeType: 'audio/ogg' };
+            const preferredMimeTypes = [
+                'audio/mp4;codecs=mp4a.40.2',
+                'audio/mp4',
+                'audio/aac',
+                'audio/ogg;codecs=opus',
+                'audio/ogg',
+                'audio/webm;codecs=opus',
+                'audio/webm'
+            ];
+
+            for (const candidateMimeType of preferredMimeTypes) {
+                if (!MediaRecorder.isTypeSupported(candidateMimeType)) continue;
+                mimeType = candidateMimeType;
+                mimeTypeOptions = { mimeType: candidateMimeType };
+                break;
             }
         }
 
@@ -2186,19 +2349,32 @@ async function startRecording() {
             }
         };
 
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onerror = (event) => {
+            console.error('MediaRecorder error:', event?.error || event);
+        };
+
+        mediaRecorder.onstop = async () => {
             // Stop all tracks in the stream
             stream.getTracks().forEach(track => track.stop());
 
             // Create blob from recorded chunks with correct MIME type
             const audioBlob = new Blob(recordedChunks, { type: mimeType });
+            const recordingMs = recordingStartTime ? Date.now() - recordingStartTime : 0;
+            recordingStartTime = null;
+
+            const preparedVoice = await prepareVoiceBlobForUpload(audioBlob, mimeType, recordingMs);
+            if (!preparedVoice) {
+                const corruptedMessage = window.i18n ? window.i18n.t('errors.voiceCorrupted') : 'Voice recording is corrupted. Please try again.';
+                alert(corruptedMessage);
+                return;
+            }
 
             // Send the recorded audio
-            sendVoiceMessage(audioBlob, mimeType);
+            sendVoiceMessage(preparedVoice.blob, preparedVoice.mimeType);
         };
 
         // Start recording
-        mediaRecorder.start();
+        mediaRecorder.start(250);
         isRecording = true;
         recordingStartTime = Date.now();
 
@@ -2214,7 +2390,14 @@ async function startRecording() {
 
 function stopRecording() {
     if (mediaRecorder && isRecording) {
-        mediaRecorder.stop();
+        if (mediaRecorder.state !== 'inactive') {
+            try {
+                mediaRecorder.requestData();
+            } catch (error) {
+                console.warn('MediaRecorder.requestData failed:', error);
+            }
+            mediaRecorder.stop();
+        }
         isRecording = false;
         
         // Update UI to hide recording state
@@ -2773,7 +2956,9 @@ function addMessageToUI(message) {
 
                 // Send to transcription API
                 const formData = new FormData();
-                formData.append('file', audioBlob, 'voice_message.webm');
+                const transcribeMimeType = audioBlob.type || 'audio/mp4';
+                const transcribeExt = getFileExtensionFromMime(transcribeMimeType) || 'm4a';
+                formData.append('file', audioBlob, `voice_message.${transcribeExt}`);
 
                 const apiUrl = getApiUrl();
                 console.log('[Transcribe] Sending to API:', apiUrl + '/api/transcribe');
@@ -2830,10 +3015,8 @@ function addMessageToUI(message) {
 
         // Update duration when metadata is loaded - show total duration
         audio.addEventListener('loadedmetadata', () => {
-            totalDuration = audio.duration;
-            const minutes = Math.floor(totalDuration / 60);
-            const seconds = Math.floor(totalDuration % 60);
-            durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            totalDuration = isValidAudioDuration(audio.duration) ? audio.duration : 0;
+            durationDisplay.textContent = formatAudioDuration(totalDuration);
             durationDisplay.style.color = 'var(--muted)';
         });
 
@@ -2843,15 +3026,13 @@ function addMessageToUI(message) {
             const duration = audio.duration;
 
             // Update progress bar
-            if (duration > 0) {
+            if (isValidAudioDuration(duration)) {
                 const progressPercent = (currentTime / duration) * 100;
                 waveformProgress.style.width = `${progressPercent}%`;
 
                 // Show remaining time during playback
                 const remainingTime = duration - currentTime;
-                const remainingMinutes = Math.floor(remainingTime / 60);
-                const remainingSeconds = Math.floor(remainingTime % 60);
-                durationDisplay.textContent = `-${remainingMinutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+                durationDisplay.textContent = `-${formatAudioDuration(remainingTime)}`;
                 durationDisplay.style.color = 'var(--accent)';
 
                 // Update waveform bars to show progress dynamically
@@ -2894,10 +3075,8 @@ function addMessageToUI(message) {
             waveformProgress.style.width = '0%';
 
             // Reset duration display to total
-            if (totalDuration) {
-                const minutes = Math.floor(totalDuration / 60);
-                const seconds = Math.floor(totalDuration % 60);
-                durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            if (isValidAudioDuration(totalDuration)) {
+                durationDisplay.textContent = formatAudioDuration(totalDuration);
                 durationDisplay.style.color = 'var(--muted)';
             }
 
@@ -2913,10 +3092,8 @@ function addMessageToUI(message) {
 
         // Reset duration display when audio pauses
         audio.addEventListener('pause', () => {
-            if (totalDuration) {
-                const minutes = Math.floor(totalDuration / 60);
-                const seconds = Math.floor(totalDuration % 60);
-                durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            if (isValidAudioDuration(totalDuration)) {
+                durationDisplay.textContent = formatAudioDuration(totalDuration);
                 durationDisplay.style.color = 'var(--muted)';
             }
         });
@@ -2928,7 +3105,7 @@ function addMessageToUI(message) {
             const width = rect.width;
             const duration = audio.duration;
 
-            if (duration > 0) {
+            if (isValidAudioDuration(duration)) {
                 const seekTime = (clickX / width) * duration;
                 audio.currentTime = seekTime;
 
@@ -2967,7 +3144,8 @@ function addMessageToUI(message) {
                 animationTime += 0.15;
                 const bars = waveformBars.querySelectorAll('div');
                 const totalBars = bars.length;
-                const currentBar = Math.floor((audio.currentTime / audio.duration) * totalBars);
+                const safeDuration = isValidAudioDuration(audio.duration) ? audio.duration : 1;
+                const currentBar = Math.floor((audio.currentTime / safeDuration) * totalBars);
 
                 bars.forEach((bar, index) => {
                     if (index < currentBar) {
@@ -7748,15 +7926,11 @@ function restoreVoiceMessageHandlers() {
                     // Обновляем длительность при загрузке метаданных
                     if (audio.readyState >= 1) {
                         // Если аудио уже загружено, обновляем длительность
-                        const minutes = Math.floor(audio.duration / 60);
-                        const seconds = Math.floor(audio.duration % 60);
-                        durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                        durationDisplay.textContent = formatAudioDuration(audio.duration);
                     } else {
                         // Если аудио еще не загружено, ждем события loadedmetadata
                         audio.addEventListener('loadedmetadata', function updateDuration() {
-                            const minutes = Math.floor(audio.duration / 60);
-                            const seconds = Math.floor(audio.duration % 60);
-                            durationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                            durationDisplay.textContent = formatAudioDuration(audio.duration);
                             audio.removeEventListener('loadedmetadata', updateDuration);
                         });
                     }
