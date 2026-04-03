@@ -14,6 +14,7 @@ const { JSDOM } = require('jsdom');
 
 const { initializeDatabase, userDB, dmDB, fileDB, reactionDB, newsReactionDB, friendDB, serverDB, channelDB, sessionDB, notificationDB } = require('./database');
 const { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS } = require('./config');
+const mediasoupService = require('./mediasoupService');
 
 const app = express();
 
@@ -996,6 +997,21 @@ const activeCalls = new Map();
 // Store user call states
 const userCallStates = new Map();
 
+function respondWith(callback, promise) {
+    promise
+        .then((data) => {
+            if (typeof callback === 'function') {
+                callback(data);
+            }
+        })
+        .catch((error) => {
+            console.error('Socket handler error:', error);
+            if (typeof callback === 'function') {
+                callback({ error: error.message });
+            }
+        });
+}
+
 // Socket.IO connection handling
 io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
@@ -1034,6 +1050,8 @@ io.on('connection', async (socket) => {
 
     try {
         const user = await userDB.findById(socket.userId);
+        socket.username = user?.username || 'User';
+        socket.avatar = user?.avatar || socket.username.charAt(0).toUpperCase();
 
         users.set(socket.id, {
             ...user,
@@ -1296,6 +1314,38 @@ io.on('connection', async (socket) => {
         }
     });
 
+    socket.on('mediasoup:get-router-rtp-capabilities', (_, callback) => {
+        respondWith(callback, mediasoupService.getRouterRtpCapabilities());
+    });
+
+    socket.on('mediasoup:join-call', (data, callback) => {
+        respondWith(callback, mediasoupService.joinCall(socket, data || {}));
+    });
+
+    socket.on('mediasoup:create-transport', (data, callback) => {
+        respondWith(callback, mediasoupService.createTransport(socket, data || {}));
+    });
+
+    socket.on('mediasoup:connect-transport', (data, callback) => {
+        respondWith(callback, mediasoupService.connectTransport(socket, data || {}));
+    });
+
+    socket.on('mediasoup:produce', (data, callback) => {
+        respondWith(callback, mediasoupService.produce(socket, data || {}));
+    });
+
+    socket.on('mediasoup:list-producers', (data, callback) => {
+        respondWith(callback, mediasoupService.listProducers(socket, data || {}));
+    });
+
+    socket.on('mediasoup:consume', (data, callback) => {
+        respondWith(callback, mediasoupService.consume(socket, data || {}));
+    });
+
+    socket.on('mediasoup:leave-call', (_, callback) => {
+        respondWith(callback, mediasoupService.leaveCall(socket));
+    });
+
     socket.on('voice-activity', (data) => {
         socket.broadcast.emit('user-speaking', {
             userId: socket.userId,
@@ -1361,7 +1411,7 @@ io.on('connection', async (socket) => {
         }
     });
 
-    socket.on('initiate-call', (data) => {
+    socket.on('initiate-call', (data, callback) => {
         const { to, type, from } = data;
         console.log(`Call initiated from ${from.id} to ${to}, type: ${type}`);
 
@@ -1374,16 +1424,15 @@ io.on('connection', async (socket) => {
                 const callData = activeCalls.get(existingCall);
 
                 if (callData) {
-                    // Добавляем инициатора к существующему звонку
-                    callData.participants.push(from.id);
-                    callData.socketIds.push(socket.id);
-
                     // Уведомляем инициатора о необходимости присоединиться к существующему звонку
                     socket.emit('join-existing-call', {
                         callId: existingCall,
                         participants: callData.participants,
-                        type: type
+                        type: callData.type
                     });
+                    if (typeof callback === 'function') {
+                        callback({ callId: existingCall });
+                    }
                 }
             } else {
                 // Создаем запись активного звонка
@@ -1391,7 +1440,8 @@ io.on('connection', async (socket) => {
                 activeCalls.set(callId, {
                     participants: [from.id, to],
                     initiator: from.id,
-                    socketIds: [socket.id, receiverSocket.socketId]
+                    socketIds: [socket.id, receiverSocket.socketId],
+                    type
                 });
 
                 // Обновляем состояние пользователя
@@ -1411,8 +1461,12 @@ io.on('connection', async (socket) => {
                         socketId: socket.id,
                         avatar: from.username?.charAt(0).toUpperCase()
                     },
-                    type: type
+                    type: type,
+                    callId
                 });
+                if (typeof callback === 'function') {
+                    callback({ callId });
+                }
             }
         } else {
             // Пользователь офлайн - сохраняем пропущенный звонок в базу
@@ -1428,35 +1482,46 @@ io.on('connection', async (socket) => {
                 type: type,
                 timestamp: new Date().toISOString()
             });
+            if (typeof callback === 'function') {
+                callback({ callId: null, offline: true });
+            }
         }
     });
 
     socket.on('accept-call', (data) => {
-        const { to, from } = data;
+        const { callId, to, from } = data;
         console.log(`Call accepted by ${from.id}, connecting to ${to}`);
 
-        // Обновляем состояние пользователя
-        const callId = `${from.id}-${to.id}-${Date.now()}`; // нужно получить реальный ID звонка
+        const callData = activeCalls.get(callId);
+        if (!callData) {
+            return;
+        }
+
+        if (!callData.participants.includes(from.id)) {
+            callData.participants.push(from.id);
+        }
+        if (!callData.socketIds.includes(socket.id)) {
+            callData.socketIds.push(socket.id);
+        }
+
         userCallStates.set(from.id, {
             inCall: true,
-            callId: callId
+            callId
         });
-        
-        io.to(to).emit('call-accepted', {
+
+        const payload = {
+            callId,
+            type: callData.type,
+            participants: callData.participants,
             from: {
                 id: from.id,
                 username: from.username,
                 socketId: socket.id
             }
-        });
-        
-        // Также отправляем подтверждение обратно тому, кто принял вызов
-        socket.emit('call-accepted', {
-            from: {
-                id: from.id,
-                username: from.username,
-                socketId: socket.id
-            }
+        };
+
+        callData.socketIds.forEach((socketId) => {
+            io.to(socketId).emit('call-accepted', payload);
         });
     });
 
@@ -1480,37 +1545,43 @@ io.on('connection', async (socket) => {
         }
     });
 
-    socket.on('end-call', (data) => {
-        const { to } = data;
-        if (to) {
-            io.to(to).emit('call-ended', { from: socket.id });
-            
-            // Уведомляем других участников звонка о выходе пользователя
-            for (let [callId, callData] of activeCalls.entries()) {
-                if (callData.socketIds.includes(socket.id)) {
-                    // Удаляем текущий сокет из списка участников
-                    const otherParticipants = callData.socketIds.filter(sockId => sockId !== socket.id);
-                    
-                    // Уведомляем других участников о выходе
-                    otherParticipants.forEach(otherSocketId => {
-                        io.to(otherSocketId).emit('user-left-call', {
-                            userId: socket.userId,
-                            socketId: socket.id
-                        });
-                    });
-                    
-                    // Удаляем звонок из активных
-                    activeCalls.delete(callId);
-                    
-                    // Обновляем состояние пользователей
-                    callData.participants.forEach(userId => {
-                        if (userCallStates.has(userId)) {
-                            userCallStates.delete(userId);
-                        }
-                    });
-                    break;
-                }
-            }
+    socket.on('end-call', (data = {}) => {
+        const targetCallId = data.callId || userCallStates.get(socket.userId)?.callId;
+        if (!targetCallId || !activeCalls.has(targetCallId)) {
+            mediasoupService.leaveCall(socket).catch((error) => {
+                console.error('mediasoup leave-call error:', error);
+            });
+            return;
+        }
+
+        const callData = activeCalls.get(targetCallId);
+        callData.socketIds = callData.socketIds.filter((socketId) => socketId !== socket.id);
+        callData.participants = callData.participants.filter((userId) => userId !== socket.userId);
+
+        mediasoupService.leaveCall(socket).catch((error) => {
+            console.error('mediasoup leave-call error:', error);
+        });
+
+        callData.socketIds.forEach((otherSocketId) => {
+            io.to(otherSocketId).emit('user-left-call', {
+                callId: targetCallId,
+                userId: socket.userId,
+                socketId: socket.id
+            });
+        });
+
+        userCallStates.delete(socket.userId);
+
+        if (callData.socketIds.length === 0) {
+            activeCalls.delete(targetCallId);
+            return;
+        }
+
+        if (callData.socketIds.length === 1) {
+            io.to(callData.socketIds[0]).emit('call-ended', {
+                callId: targetCallId,
+                from: socket.id
+            });
         }
     });
     
@@ -1544,6 +1615,7 @@ io.on('connection', async (socket) => {
 
     socket.on('disconnect', async () => {
         const user = users.get(socket.id);
+        mediasoupService.closePeer(socket.id);
 
         if (user) {
             console.log(`${user.username} disconnected`);
@@ -1557,26 +1629,21 @@ io.on('connection', async (socket) => {
             // Уведомляем других участников активных звонков о выходе пользователя
             for (let [callId, callData] of activeCalls.entries()) {
                 if (callData.socketIds.includes(socket.id)) {
-                    // Удаляем текущий сокет из списка участников
-                    const otherParticipants = callData.socketIds.filter(sockId => sockId !== socket.id);
-                    
-                    // Уведомляем других участников о выходе
-                    otherParticipants.forEach(otherSocketId => {
+                    callData.socketIds = callData.socketIds.filter((socketId) => socketId !== socket.id);
+                    callData.participants = callData.participants.filter((userId) => userId !== socket.userId);
+
+                    callData.socketIds.forEach((otherSocketId) => {
                         io.to(otherSocketId).emit('user-left-call', {
+                            callId,
                             userId: socket.userId,
                             socketId: socket.id
                         });
                     });
-                    
-                    // Удаляем звонок из активных
-                    activeCalls.delete(callId);
-                    
-                    // Обновляем состояние пользователей
-                    callData.participants.forEach(userId => {
-                        if (userCallStates.has(userId)) {
-                            userCallStates.delete(userId);
-                        }
-                    });
+
+                    userCallStates.delete(socket.userId);
+                    if (callData.socketIds.length === 0) {
+                        activeCalls.delete(callId);
+                    }
                 }
             }
             

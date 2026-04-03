@@ -1,6 +1,6 @@
 {
   "name": "voxii",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "Voxii - Real-time chat with voice/video calls & Notifications",
   "private": true,
   "workspaces": [

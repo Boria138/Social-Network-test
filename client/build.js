@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const esbuild = require('esbuild');
 
 const dist = path.join(__dirname, 'dist');
 
@@ -8,6 +9,21 @@ if (fs.existsSync(dist)) {
     fs.rmSync(dist, { recursive: true });
 }
 fs.mkdirSync(dist, { recursive: true });
+
+const mediasoupEntry = path.join(__dirname, 'modules', 'mediasoup-call-client.src.js');
+const mediasoupBundle = path.join(__dirname, 'modules', 'mediasoup-call-client.js');
+
+if (fs.existsSync(mediasoupEntry)) {
+    esbuild.buildSync({
+        entryPoints: [mediasoupEntry],
+        bundle: true,
+        format: 'iife',
+        outfile: mediasoupBundle,
+        platform: 'browser',
+        target: ['chrome120']
+    });
+    console.log('Built: modules/mediasoup-call-client.js');
+}
 
 // Files to copy
 const files = [
@@ -65,6 +81,13 @@ copyDir(
     path.join(__dirname, 'assets'),
     path.join(dist, 'assets'),
     'assets/'
+);
+
+// Copy browser-side helper modules
+copyDir(
+    path.join(__dirname, 'modules'),
+    path.join(dist, 'modules'),
+    'modules/'
 );
 
 // Generate news.json from CHANGELOG.md

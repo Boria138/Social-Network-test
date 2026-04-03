@@ -39,10 +39,6 @@ let isMobileView = window.innerWidth <= 820;
 let editingMessageId = null;
 let pinnedMessageIds = [];
 let activePinnedMessageIndex = 0;
-let twemojiObserver = null;
-let twemojiParseTimer = null;
-const twemojiPendingNodes = new Set();
-let isTwemojiParsing = false;
 let uploadInFlightCount = 0;
 let currentUploadKind = 'file';
 let currentUploadLabel = '';
@@ -63,6 +59,8 @@ const hiddenPreviews = new Set();
 
 // Notification service
 let notificationService = null;
+let notificationsUI = null;
+let callMediaController = null;
 const ICON_SVG = {
     check: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
     close: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z"/></svg>',
@@ -70,73 +68,15 @@ const ICON_SVG = {
 };
 
 function parseTwemoji(root = document.body) {
-    if (typeof twemoji === 'undefined' || !root) return;
-
-    isTwemojiParsing = true;
-    try {
-        twemoji.parse(root, {
-            folder: 'svg',
-            ext: '.svg'
-        });
-    } finally {
-        isTwemojiParsing = false;
-    }
+    window.VoxiiTwemojiUI?.parse(root);
 }
 
 function queueTwemojiParse(node) {
-    if (typeof twemoji === 'undefined' || !node) return;
-
-    const targetNode = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
-    if (!targetNode || targetNode.nodeType !== Node.ELEMENT_NODE) return;
-    if (targetNode.matches && targetNode.matches('img.emoji')) return;
-
-    twemojiPendingNodes.add(targetNode);
-    if (twemojiParseTimer) return;
-
-    twemojiParseTimer = setTimeout(() => {
-        twemojiParseTimer = null;
-        const nodes = Array.from(twemojiPendingNodes);
-        twemojiPendingNodes.clear();
-        nodes.forEach(parseTwemoji);
-    }, 0);
+    window.VoxiiTwemojiUI?.queueParse(node);
 }
 
 function initializeTwemojiRendering() {
-    if (typeof twemoji === 'undefined' || !document.body) return;
-
-    parseTwemoji(document.body);
-
-    if (twemojiObserver) {
-        twemojiObserver.disconnect();
-    }
-
-    twemojiObserver = new MutationObserver((mutations) => {
-        if (isTwemojiParsing) return;
-
-        mutations.forEach((mutation) => {
-            if (mutation.type === 'characterData') {
-                queueTwemojiParse(mutation.target);
-                return;
-            }
-
-            mutation.addedNodes.forEach((addedNode) => {
-                if (addedNode.nodeType === Node.TEXT_NODE) {
-                    queueTwemojiParse(addedNode);
-                    return;
-                }
-
-                if (addedNode.nodeType !== Node.ELEMENT_NODE) return;
-                if (addedNode.matches && addedNode.matches('img.emoji')) return;
-                queueTwemojiParse(addedNode);
-            });
-        });
-    });
-
-    twemojiObserver.observe(document.body, {
-        childList: true,
-        subtree: true,
-        characterData: true
-    });
+    window.VoxiiTwemojiUI?.initialize();
 }
 
 // Initialize
@@ -164,6 +104,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 function initializeApp() {
+    notificationsUI = window.VoxiiNotificationsUI?.createController({
+        getCurrentDMUserId: () => currentDMUserId,
+        getCurrentView: () => currentView,
+        getLastLoadedFriends: () => window.lastLoadedFriends,
+        getService: () => notificationService,
+        onCallUser: (userId, callType) => {
+            initiateCall(userId, callType);
+        },
+        populateDMList,
+        setService: (service) => {
+            notificationService = service;
+        }
+    }) || null;
+
     updateUserInfo();
     initializeFriendsTabs();
     initializeMessageInput();
@@ -210,66 +164,19 @@ function initializeApp() {
 }
 
 function initializeMobileKeyboardAvoidance() {
-    const messageInput = document.getElementById('messageInput');
-    if (!messageInput || !window.visualViewport) return;
-
-    const root = document.documentElement;
-    const isMobile = () => window.innerWidth <= 820;
-    const isInputFocused = () => document.activeElement === messageInput;
-
-    const resetOffset = () => {
-        root.style.setProperty('--vk-offset', '0px');
-        document.body.classList.remove('vk-open');
-    };
-
-    const updateKeyboardOffset = () => {
-        if (!isMobile() || !isInputFocused()) {
-            resetOffset();
-            return;
-        }
-
-        const vv = window.visualViewport;
-        const rawKeyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
-        const keyboardHeight = rawKeyboardHeight > 120 ? Math.round(rawKeyboardHeight) : 0;
-        root.style.setProperty('--vk-offset', `${keyboardHeight}px`);
-        document.body.classList.toggle('vk-open', keyboardHeight > 0);
-
-        if (keyboardHeight > 0) {
-            requestAnimationFrame(() => {
-                messageInput.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-            });
-        }
-    };
-
-    messageInput.addEventListener('focus', () => {
-        setTimeout(updateKeyboardOffset, 60);
-    });
-
-    messageInput.addEventListener('blur', () => {
-        setTimeout(resetOffset, 60);
-    });
-
-    window.visualViewport.addEventListener('resize', updateKeyboardOffset);
-    window.visualViewport.addEventListener('scroll', updateKeyboardOffset);
-    window.addEventListener('resize', updateKeyboardOffset);
+    window.VoxiiMobileKeyboard?.initializeMessageKeyboardAvoidance();
 }
 
 function requestNotificationPermissionOnce() {
-    if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-    }
+    notificationsUI?.requestPermissionOnce();
 }
 
 function requestNotificationPermission() {
-    if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-    }
+    notificationsUI?.requestPermission();
 }
 
 function showNotification(title, body) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, { body });
-    }
+    return notificationsUI?.showNotification(title, body) || null;
 }
 
 // ==========================================
@@ -277,232 +184,32 @@ function showNotification(title, body) {
 // ==========================================
 
 function initializeNotifications() {
-    if (typeof NotificationService === 'undefined') {
-        console.warn('NotificationService not loaded, skipping initialization');
-        return;
-    }
-
-    notificationService = new NotificationService();
-    notificationService.init();
-
-    // Инициализация обработчиков панели уведомлений
-    initializeNotificationsPanel();
-
-    // Обновляем DM список с бейджами после загрузки уведомлений
-    setTimeout(() => {
-        if (window.lastLoadedFriends) {
-            populateDMList(window.lastLoadedFriends);
-        }
-    }, 500);
+    notificationsUI?.initialize();
 }
 
 function initializeNotificationsPanel() {
-    const notificationsBtn = document.getElementById('notificationsBtn');
-    const notificationsPanel = document.getElementById('notificationsPanel');
-    const markAllReadBtn = document.getElementById('markAllReadBtn');
-    const notificationBadge = document.getElementById('notificationBadge');
-    
-    // Открытие/закрытие панели уведомлений
-    if (notificationsBtn) {
-        notificationsBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (notificationsPanel) {
-                notificationsPanel.classList.toggle('active');
-                const isActive = notificationsPanel.classList.contains('active');
-                notificationsPanel.setAttribute('aria-hidden', !isActive);
-                
-                // Если открываем панель, помечаем уведомления как прочитанные
-                if (isActive) {
-                    notificationService?.markMissedCallsAsRead();
-                    renderNotificationsList();
-                }
-            }
-        });
-    }
-    
-    // Закрытие панели при клике вне её
-    document.addEventListener('click', (e) => {
-        if (notificationsPanel && !notificationsPanel.contains(e.target) && 
-            (!notificationsBtn || !notificationsBtn.contains(e.target))) {
-            notificationsPanel.classList.remove('active');
-            notificationsPanel.setAttribute('aria-hidden', 'true');
-        }
-    });
-    
-    // Отметить все как прочитанные
-    if (markAllReadBtn) {
-        markAllReadBtn.addEventListener('click', () => {
-            notificationService?.markMissedCallsAsRead();
-            updateNotificationBadge();
-            renderNotificationsList();
-        });
-    }
-    
-    // Загрузка сохраненных уведомлений из localStorage
-    notificationService?.loadFromLocalStorage();
-    updateNotificationBadge();
-    renderNotificationsList();
+    notificationsUI?.initializePanel();
 }
 
 function updateNotificationBadge() {
-    const badge = document.getElementById('notificationBadge');
-    if (!badge) return;
-    
-    // Считаем все непрочитанные уведомления
-    const notifications = notificationService?.getNotifications() || [];
-    const unreadCount = notifications.filter(n => !n.read).length;
-    
-    if (unreadCount > 0) {
-        badge.style.display = 'flex';
-        badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
-    } else {
-        badge.style.display = 'none';
-    }
+    notificationsUI?.updateBadge();
 }
 
 function renderNotificationsList() {
-    const container = document.getElementById('notificationsList');
-    if (!container) return;
-    
-    const notifications = notificationService?.getNotifications() || [];
-    
-    if (notifications.length === 0) {
-        const emptyNotifications = window.i18n ? window.i18n.t('notifications.empty') : 'No notifications';
-        container.innerHTML = `<div class="notifications-panel-empty">${emptyNotifications}</div>`;
-        return;
-    }
-    
-    let html = '';
-    
-    notifications.forEach(notif => {
-        const timeAgo = getTimeAgo(new Date(notif.timestamp));
-        const isRead = notif.read ? '' : 'unread';
-        
-        if (notif.type === 'missed-call') {
-            const callType = notif.callType === 'video'
-                ? (window.i18n ? window.i18n.t('call.missedType.video') : 'Video')
-                : (window.i18n ? window.i18n.t('call.missedType.audio') : 'Audio');
-            const missedCallTextTemplate = window.i18n ? window.i18n.t('call.missedCall') : 'Missed {type} call';
-            const missedCallText = missedCallTextTemplate.replace('{type}', callType);
-            const callBackText = window.i18n ? window.i18n.t('actions.callBack') : 'Call back';
-            const dismissText = window.i18n ? window.i18n.t('actions.dismiss') : 'Dismiss';
-            html += `
-                <div class="notification-item ${isRead}">
-                    <div class="notification-item-icon missed-call">📞</div>
-                    <div class="notification-item-content">
-                        <div class="notification-item-header">
-                            <span class="notification-item-title">${notif.username}</span>
-                            <span class="notification-item-time">${timeAgo}</span>
-                        </div>
-                        <div class="notification-item-text">${missedCallText}</div>
-                        <div class="notification-item-actions">
-                            <button class="call-back" onclick="callUser('${notif.userId}', '${notif.callType}')">${callBackText}</button>
-                            <button class="dismiss" onclick="dismissNotification('${notif.userId}')">${dismissText}</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else if (notif.type === 'message') {
-            html += `
-                <div class="notification-item ${isRead}">
-                    <div class="notification-item-icon message">💬</div>
-                    <div class="notification-item-content">
-                        <div class="notification-item-header">
-                            <span class="notification-item-title">${notif.username}</span>
-                            <span class="notification-item-time">${timeAgo}</span>
-                        </div>
-                        <div class="notification-item-text">${notif.text}</div>
-                    </div>
-                </div>
-            `;
-        }
-    });
-    
-    container.innerHTML = html;
+    notificationsUI?.renderList();
 }
 
 function getTimeAgo(date) {
-    const seconds = Math.floor((new Date() - date) / 1000);
-    
-    if (seconds < 60) return window.i18n ? window.i18n.t('time.justNow') : 'Just now';
-    if (seconds < 3600) {
-        const minutesAgo = window.i18n ? window.i18n.t('time.minutesAgo') : '{count} min ago';
-        return minutesAgo.replace('{count}', String(Math.floor(seconds / 60)));
-    }
-    if (seconds < 86400) {
-        const hoursAgo = window.i18n ? window.i18n.t('time.hoursAgo') : '{count} h ago';
-        return hoursAgo.replace('{count}', String(Math.floor(seconds / 3600)));
-    }
-    const daysAgo = window.i18n ? window.i18n.t('time.daysAgo') : '{count} d ago';
-    return daysAgo.replace('{count}', String(Math.floor(seconds / 86400)));
+    return window.VoxiiNotificationsUI?.getTimeAgo(date) || '';
 }
 
 function addMessageNotification(sender, messageText, isDM = true) {
-    if (!notificationService) return;
-    
-    // Проверяем, находимся ли мы в текущем чате
-    const isInChat = isDM && currentView === 'dm' && currentDMUserId === sender.id;
-    
-    // Если мы в чате и окно активно, не показываем уведомление
-    if (isInChat && document.hasFocus()) {
-        return;
-    }
-    
-    // Увеличиваем счетчик непрочитанных (это также сохраняет уведомление в localStorage)
-    notificationService.incrementUnread(sender.id, {
-        username: sender.username,
-        avatar: sender.avatar,
-        text: messageText
-    });
-    updateNotificationBadge();
-    renderNotificationsList();
-    
-    // Показываем браузерное уведомление и звук
-    notificationService.showMessageNotification(sender, messageText, isDM);
+    notificationsUI?.addMessageNotification(sender, messageText, isDM);
 }
 
 function addCallNotification(fromUser, callType = 'voice') {
-    if (!notificationService) return;
-    
-    // Показываем браузерное уведомление
-    const incomingCallTitle = window.i18n ? window.i18n.t('call.incoming') : 'Incoming call';
-    const incomingCallBodyTemplate = window.i18n ? window.i18n.t('call.isCallingYou') : '{username} is calling you';
-    const incomingCallBody = incomingCallBodyTemplate.replace('{username}', fromUser.username);
-    notificationService.showBrowserNotification(incomingCallTitle, {
-        body: incomingCallBody,
-        requireInteraction: true,
-        tag: 'incoming-call'
-    });
-    
-    // Звуковое уведомление
-    notificationService.playNotificationSound('call');
+    notificationsUI?.addCallNotification(fromUser, callType);
 }
-
-// Глобальные функции для кнопок в уведомлениях
-window.callUser = function(userId, callType) {
-    // Закрытие панели уведомлений
-    const panel = document.getElementById('notificationsPanel');
-    if (panel) panel.classList.remove('active');
-    
-    // Инициирование звонка (будет вызвано из существующей функции)
-    console.log('Calling user:', userId, callType);
-    // Здесь будет вызов существующей функции начала звонка
-};
-
-window.dismissNotification = function(userId) {
-    if (notificationService) {
-        // Удаляем уведомления для этого пользователя
-        notificationService.notifications = notificationService.notifications.filter(
-            n => n.userId !== userId
-        );
-        notificationService.missedCalls = notificationService.missedCalls.filter(
-            c => c.from.id !== userId
-        );
-        notificationService.saveToLocalStorage();
-        renderNotificationsList();
-        updateNotificationBadge();
-    }
-};
 
 
 function updateUserInfo() {
@@ -511,6 +218,66 @@ function updateUserInfo() {
 
     if (userAvatarContent) userAvatarContent.textContent = currentUser.avatar;
     if (username) username.textContent = currentUser.username;
+}
+
+function renderRemoteParticipantStream({ peerId, stream, username }) {
+    const remoteParticipants = document.getElementById('remoteParticipants');
+    if (!remoteParticipants || !peerId || !stream) return;
+
+    let participantDiv = document.getElementById(`participant-${peerId}`);
+    let remoteVideo = document.getElementById(`remote-${peerId}`);
+
+    if (!participantDiv) {
+        participantDiv = document.createElement('div');
+        participantDiv.className = 'participant';
+        participantDiv.id = `participant-${peerId}`;
+
+        remoteVideo = document.createElement('video');
+        remoteVideo.id = `remote-${peerId}`;
+        remoteVideo.autoplay = true;
+        remoteVideo.playsInline = true;
+        remoteVideo.muted = false;
+        remoteVideo.volume = isDeafened ? 0 : 1;
+
+        const participantName = document.createElement('div');
+        participantName.className = 'participant-name';
+        participantName.textContent = username || (window.i18n ? window.i18n.t('chat.participant') : 'Participant');
+
+        participantDiv.appendChild(remoteVideo);
+        participantDiv.appendChild(participantName);
+        remoteParticipants.appendChild(participantDiv);
+        makeResizable(participantDiv);
+    }
+
+    if (remoteVideo) {
+        remoteVideo.srcObject = stream;
+        remoteVideo.play().catch(() => {});
+    }
+}
+
+function removeRemoteParticipant(peerId) {
+    if (!peerId) return;
+    const participant = document.getElementById(`participant-${peerId}`);
+    if (participant) {
+        participant.remove();
+    }
+}
+
+function setupCallMediaController() {
+    if (!socket || callMediaController || !window.VoxiiMediasoupCalls) return;
+
+    callMediaController = window.VoxiiMediasoupCalls.createController({
+        onPeerClosed: removeRemoteParticipant,
+        onRemoteStream: renderRemoteParticipantStream,
+        socket
+    });
+}
+
+async function startCallMediaSession(callId) {
+    if (!callId || !localStream) return;
+    setupCallMediaController();
+    if (!callMediaController) return;
+    await callMediaController.start(callId, localStream);
 }
 
 function connectToSocketIO() {
@@ -531,6 +298,7 @@ function connectToSocketIO() {
         ...(window.APP_CONFIG?.SOCKET_OPTIONS || {})
     };
     socket = apiUrl ? io(apiUrl, socketOpts) : io(socketOpts);
+    setupCallMediaController();
     registerWebRTCSignalingHandlers();
     
     socket.on('connect', () => {
@@ -695,26 +463,23 @@ function connectToSocketIO() {
     });
 
     socket.on('incoming-call', (data) => {
-            const { from, type } = data;
+            const { from, type, callId } = data;
             if (from) {
                 // Добавляем уведомление о входящем звонке
                 addCallNotification(from, type);
-                showIncomingCall(from, type);
+                showIncomingCall(from, type, callId);
             }
         });
 
-    socket.on('call-accepted', (data) => {
+    socket.on('call-accepted', async (data) => {
             console.log('Call accepted by:', data.from);
-            // When call is accepted, create peer connection
+            if (window.currentCallDetails) {
+                window.currentCallDetails.callId = data.callId;
+                window.currentCallDetails.participants = data.participants || window.currentCallDetails.participants || [];
+            }
             const connectedWithLabel = window.i18n ? window.i18n.t('chat.connectedWith') : 'Connected with';
             document.querySelector('.call-channel-name').textContent = `${connectedWithLabel} ${data.from.username}`;
-
-            // Create peer connection - для инициатора вызова создаем как инициатора, для принимающего - как не-инициатора
-            if (!peerConnections[data.from.socketId]) {
-                // Определяем, является ли текущий пользователь инициатором вызова
-                const isInitiator = window.currentCallDetails && window.currentCallDetails.isInitiator;
-                createPeerConnection(data.from.socketId, isInitiator);
-            }
+            await startCallMediaSession(data.callId);
         });
         
     // Обработка присоединения к существующему звонку
@@ -743,17 +508,17 @@ function connectToSocketIO() {
         });
         
     socket.on('call-ended', (data) => {
-            // Handle when other party ends the call
-            if (peerConnections[data.from]) {
-                peerConnections[data.from].close();
-                clearPeerConnectionRuntimeState(data.from);
-                delete peerConnections[data.from];
-            }
-            const remoteVideo = document.getElementById(`remote-${data.from}`);
-            if (remoteVideo) remoteVideo.remove();
+            removeRemoteParticipant(data.from);
+            leaveVoiceChannel(true);
+        });
 
-            // If no more connections, end the call
-            if (Object.keys(peerConnections).length === 0) {
+    socket.on('user-left-call', (data) => {
+            removeRemoteParticipant(data.socketId);
+            if (window.currentCallDetails?.participants) {
+                window.currentCallDetails.participants = window.currentCallDetails.participants
+                    .filter(id => id !== data.userId);
+            }
+            if (!window.currentCallDetails?.participants?.length) {
                 leaveVoiceChannel(true);
             }
         });
@@ -810,9 +575,8 @@ function connectToSocketIO() {
         if (window.currentCallDetails) {
             window.currentCallDetails.participants = participants;
         }
-        // Создаем соединение с инициатором
-        if (!peerConnections[from.socketId]) {
-            createPeerConnection(from.socketId, false); // не инициатор
+        if (from?.username) {
+            document.querySelector('.call-channel-name').textContent = from.username;
         }
     });
 }
@@ -1710,6 +1474,10 @@ async function initiateCall(friendId, type) {
                     username: currentUser.username,
                     socketId: socket.id
                 }
+            }, (response = {}) => {
+                if (response.callId && window.currentCallDetails) {
+                    window.currentCallDetails.callId = response.callId;
+                }
             });
         }
 
@@ -1746,42 +1514,19 @@ async function addParticipantToCall(friendId, type) {
             return;
         }
 
-        // Создаем новое peer-соединение для участника
-        const socketId = getSocketIdByUserId(friendId); // Нужно реализовать функцию получения socketId по userId
-        if (socketId) {
-            // Создаем peer-соединение с новым участником
-            if (!peerConnections[socketId]) {
-                createPeerConnection(socketId, true); // initiator
-                
-                // Обновляем список участников
-                if (window.currentCallDetails && !window.currentCallDetails.participants.includes(friendId)) {
-                    window.currentCallDetails.participants.push(friendId);
-                }
-                
-                // Уведомляем нового участника о присоединении к звонку
-                socket.emit('add-participant-to-call', {
-                    to: socketId,
-                    type: type,
-                    from: {
-                        id: currentUser.id,
-                        username: currentUser.username,
-                        socketId: socket.id
-                    },
-                    participants: window.currentCallDetails.participants
-                });
-            }
-        } else {
-            // Если пользователь оффлайн, отправляем ему приглашение
-            socket.emit('invite-to-call', {
-                to: friendId,
-                callId: window.currentCallDetails ? window.currentCallDetails.friendId : null,
-                type: type,
-                inviter: {
-                    id: currentUser.id,
-                    username: currentUser.username
-                }
-            });
+        if (window.currentCallDetails && !window.currentCallDetails.participants.includes(friendId)) {
+            window.currentCallDetails.participants.push(friendId);
         }
+
+        socket.emit('invite-to-call', {
+            to: friendId,
+            callId: window.currentCallDetails ? window.currentCallDetails.callId : null,
+            type: type,
+            inviter: {
+                id: currentUser.id,
+                username: currentUser.username
+            }
+        });
     } catch (error) {
         console.error('Error adding participant to call:', error);
     }
@@ -1799,7 +1544,7 @@ function getSocketIdByUserId(userId) {
 }
 
 // Show incoming call notification
-function showIncomingCall(caller, type) {
+function showIncomingCall(caller, type, callId) {
     const incomingCallDiv = document.getElementById('incomingCall');
     const callerName = incomingCallDiv.querySelector('.caller-name');
     const callerAvatar = incomingCallDiv.querySelector('.caller-avatar');
@@ -1815,7 +1560,7 @@ function showIncomingCall(caller, type) {
 
     acceptBtn.onclick = async () => {
         incomingCallDiv.classList.add('hidden');
-        await acceptCall(caller, type);
+        await acceptCall(caller, type, callId);
     };
 
     rejectBtn.onclick = () => {
@@ -1921,15 +1666,11 @@ async function joinExistingCall(inviter, callId, type) {
             participants: [inviter.id] // Инициализируем списком участников
         };
 
-        // Создаем соединение с инициатором звонка
-        if (inviter.socketId && !peerConnections[inviter.socketId]) {
-            createPeerConnection(inviter.socketId, false);
-        }
-
         inCall = true;
         isVideoEnabled = type === 'video';
         isAudioEnabled = true;
         updateCallButtons();
+        await startCallMediaSession(callId);
 
         // Initialize resizable functionality after a short delay
         setTimeout(() => {
@@ -1945,7 +1686,7 @@ async function joinExistingCall(inviter, callId, type) {
 }
 
 // Accept incoming call
-async function acceptCall(caller, type) {
+async function acceptCall(caller, type, callId) {
     try {
         // Always request both video and audio
         const constraints = { video: true, audio: true };
@@ -1971,6 +1712,7 @@ async function acceptCall(caller, type) {
         
         // Store call details
         window.currentCallDetails = {
+            callId: callId,
             peerId: caller.socketId,
             type: type,
             isInitiator: false,
@@ -1980,6 +1722,7 @@ async function acceptCall(caller, type) {
         
         if (socket && socket.connected) {
             socket.emit('accept-call', {
+                callId,
                 to: caller.socketId,
                 from: {
                     id: currentUser.id,
@@ -1993,23 +1736,6 @@ async function acceptCall(caller, type) {
         isVideoEnabled = type === 'video';
         isAudioEnabled = true;
         updateCallButtons();
-        
-        // Create peer connection as receiver (not initiator)
-        if (!peerConnections[caller.socketId]) {
-            createPeerConnection(caller.socketId, false);
-        }
-        
-        // Notify the caller that the call was accepted
-        if (socket && socket.connected) {
-            socket.emit('accept-call', {
-                to: caller.socketId,
-                from: {
-                    id: currentUser.id,
-                    username: currentUser.username,
-                    socketId: socket.id
-                }
-            });
-        }
         
         // Initialize resizable functionality after a short delay
         setTimeout(() => {
@@ -5957,16 +5683,6 @@ function initializeCallControls() {
 
     if (closeCallBtn) {
         closeCallBtn.addEventListener('click', () => {
-            // End call for direct calls
-            if (window.currentCallDetails) {
-                // End a direct call
-                Object.keys(peerConnections).forEach(socketId => {
-                    if (socket && socket.connected) {
-                        socket.emit('end-call', { to: socketId });
-                    }
-                });
-            }
-            // Leave the voice channel and clean up resources
             leaveVoiceChannel();
         });
     }
@@ -6008,16 +5724,11 @@ function toggleVideo() {
     localStream.getVideoTracks().forEach(track => {
         track.enabled = isVideoEnabled;
     });
-    
-    // Notify peer about video state change
-    Object.keys(peerConnections).forEach(socketId => {
-        if (socket && socket.connected) {
-            socket.emit('video-toggle', {
-                to: socketId,
-                enabled: isVideoEnabled
-            });
-        }
-    });
+    if (callMediaController) {
+        callMediaController.setVideoEnabled(isVideoEnabled).catch((error) => {
+            console.error('Failed to update video producer:', error);
+        });
+    }
     
     updateCallButtons();
 }
@@ -6037,6 +5748,12 @@ function toggleAudio() {
         isMuted = false;
         document.getElementById('muteBtn').classList.remove('active');
     }
+
+    if (callMediaController) {
+        callMediaController.setAudioEnabled(isAudioEnabled).catch((error) => {
+            console.error('Failed to update audio producer:', error);
+        });
+    }
     
     updateCallButtons();
 }
@@ -6046,23 +5763,17 @@ async function toggleScreenShare() {
         // Stop screen sharing
         screenStream.getTracks().forEach(track => track.stop());
 
-        // Replace screen track with camera track in all peer connections
         const videoTrack = localStream.getVideoTracks()[0];
         const micAudioTrack = localStream.getAudioTracks()[0];
         if (videoTrack) {
             videoTrack.contentHint = 'motion';
         }
-        Object.values(peerConnections).forEach(pc => {
-            const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-            if (videoSender && videoTrack) {
-                videoSender.replaceTrack(videoTrack);
-                optimizeSenderParameters(pc, videoTrack);
-            }
-            const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
-            if (audioSender && micAudioTrack) {
-                audioSender.replaceTrack(micAudioTrack);
-            }
-        });
+        if (videoTrack && callMediaController) {
+            await callMediaController.replaceVideoTrack(videoTrack);
+        }
+        if (micAudioTrack && callMediaController) {
+            await callMediaController.replaceAudioTrack(micAudioTrack);
+        }
         cleanupScreenAudioMix();
 
         screenStream = null;
@@ -6115,18 +5826,12 @@ async function toggleScreenShare() {
                 screenTrack.contentHint = 'detail';
             }
 
-            // Replace video track in all peer connections
-            Object.values(peerConnections).forEach(pc => {
-                const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                if (videoSender) {
-                    videoSender.replaceTrack(screenTrack);
-                    optimizeSenderParameters(pc, screenTrack);
-                }
-                const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
-                if (audioSender && outgoingAudioTrack) {
-                    audioSender.replaceTrack(outgoingAudioTrack);
-                }
-            });
+            if (screenTrack && callMediaController) {
+                await callMediaController.replaceVideoTrack(screenTrack);
+            }
+            if (outgoingAudioTrack && callMediaController) {
+                await callMediaController.replaceAudioTrack(outgoingAudioTrack);
+            }
 
             // Show screen share in local video
             const localVideo = document.getElementById('localVideo');
@@ -6172,18 +5877,12 @@ async function toggleScreenShare() {
                         screenTrack.contentHint = 'detail';
                     }
 
-                    // Replace video track in all peer connections
-                    Object.values(peerConnections).forEach(pc => {
-                        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                        if (videoSender) {
-                            videoSender.replaceTrack(screenTrack);
-                            optimizeSenderParameters(pc, screenTrack);
-                        }
-                        const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
-                        if (audioSender && outgoingAudioTrack) {
-                            audioSender.replaceTrack(outgoingAudioTrack);
-                        }
-                    });
+                    if (screenTrack && callMediaController) {
+                        await callMediaController.replaceVideoTrack(screenTrack);
+                    }
+                    if (outgoingAudioTrack && callMediaController) {
+                        await callMediaController.replaceAudioTrack(outgoingAudioTrack);
+                    }
 
                     // Show screen share in local video
                     const localVideo = document.getElementById('localVideo');
@@ -6985,140 +6684,6 @@ function flushPendingIceCandidates(pc) {
 function registerWebRTCSignalingHandlers() {
     if (!socket || webrtcHandlersBound) return;
     webrtcHandlersBound = true;
-
-    // Listen for remote offer (when someone calls us)
-    socket.on('offer', (data) => {
-        console.log('Received offer from:', data.from);
-        const remoteSocketId = data.from;
-        
-        // Create peer connection as receiver (not initiator)
-        if (!peerConnections[remoteSocketId]) {
-            createPeerConnection(remoteSocketId, false);
-        }
-        
-        // Get the peer connection
-        const pc = peerConnections[remoteSocketId];
-        if (pc) {
-            const readyForOffer = !makingOffers[remoteSocketId] &&
-                (pc.signalingState === 'stable' || settingRemoteAnswerPending[remoteSocketId]);
-            const offerCollision = !readyForOffer;
-            const politePeer = isPolitePeer(remoteSocketId);
-            ignoreIncomingOffers[remoteSocketId] = !politePeer && offerCollision;
-            if (ignoreIncomingOffers[remoteSocketId]) {
-                console.warn(`Ignoring collided offer from ${remoteSocketId}`);
-                return;
-            }
-
-            // Set the remote description
-            pc.setRemoteDescription(new RTCSessionDescription(data.offer))
-            .then(() => {
-                ignoreIncomingOffers[remoteSocketId] = false;
-                if (seenRemoteCandidates[remoteSocketId]) {
-                    seenRemoteCandidates[remoteSocketId].clear();
-                }
-                optimizeSenderParameters(pc);
-                flushPendingIceCandidates(pc);
-                // Create answer
-                return pc.createAnswer();
-            })
-            .then(answer => {
-                return pc.setLocalDescription(answer);
-            })
-            .then(() => {
-                // Send answer back to the caller
-                socket.emit('answer', {
-                    to: remoteSocketId,
-                    answer: pc.localDescription,
-                    from: socket.id
-                });
-            })
-            .catch(error => {
-                console.error('Error during offer processing:', error);
-            });
-        }
-    });
-
-    // Listen for remote answer
-    socket.on('answer', (data) => {
-        const remoteSocketId = data.from;
-        const pc = peerConnections[remoteSocketId];
-        if (pc) {
-            console.log('Received answer from:', remoteSocketId);
-            settingRemoteAnswerPending[remoteSocketId] = true;
-            pc.setRemoteDescription(new RTCSessionDescription(data.answer))
-            .then(() => {
-                ignoreIncomingOffers[remoteSocketId] = false;
-                if (seenRemoteCandidates[remoteSocketId]) {
-                    seenRemoteCandidates[remoteSocketId].clear();
-                }
-                optimizeSenderParameters(pc);
-                flushPendingIceCandidates(pc);
-            })
-            .catch(error => {
-                console.error('Error setting remote description:', error);
-            })
-            .finally(() => {
-                settingRemoteAnswerPending[remoteSocketId] = false;
-            });
-        }
-    });
-
-    // Listen for ICE candidates from remote peer
-    socket.on('ice-candidate', (data) => {
-        const remoteSocketId = data.from;
-        const pc = peerConnections[remoteSocketId];
-        if (pc) {
-            if (ignoreIncomingOffers[remoteSocketId]) {
-                return;
-            }
-            console.log('Received ICE candidate from:', remoteSocketId);
-            const candidateKey = `${data.candidate?.candidate || ''}|${data.candidate?.sdpMid || ''}|${data.candidate?.sdpMLineIndex || ''}|${data.candidate?.usernameFragment || data.candidate?.ufrag || ''}`;
-            if (seenRemoteCandidates[remoteSocketId] && seenRemoteCandidates[remoteSocketId].has(candidateKey)) {
-                return;
-            }
-            if (seenRemoteCandidates[remoteSocketId]) {
-                seenRemoteCandidates[remoteSocketId].add(candidateKey);
-            }
-            // Проверяем, что удаленный дескриптор уже установлен
-            if (pc.remoteDescription) {
-                try {
-                    pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                } catch (e) {
-                    console.error('Error adding received ice candidate:', e);
-                }
-            } else {
-                // Если удаленный дескриптор еще не установлен, сохраняем кандидаты для последующей обработки
-                if (!pc.candidatesToProcess) {
-                    pc.candidatesToProcess = [];
-                }
-                pc.candidatesToProcess.push(data.candidate);
-            }
-        }
-    });
-    
-    // Обработка события о выходе участника из звонка
-    socket.on('user-left-call', (data) => {
-        const { userId, socketId } = data;
-        console.log(`User ${userId} left the call`);
-        
-        // Закрываем соединение с этим пользователем
-        if (peerConnections[socketId]) {
-            peerConnections[socketId].close();
-            clearPeerConnectionRuntimeState(socketId);
-            delete peerConnections[socketId];
-        }
-        
-        // Удаляем видео этого участника
-        const remoteVideo = document.getElementById(`remote-${socketId}`);
-        if (remoteVideo) {
-            remoteVideo.remove();
-        }
-        
-        // Обновляем список участников
-        if (window.currentCallDetails && window.currentCallDetails.participants) {
-            window.currentCallDetails.participants = window.currentCallDetails.participants.filter(id => id != userId);
-        }
-    });
 }
 
 // Initialize resizable videos
@@ -8420,21 +7985,15 @@ function leaveVoiceChannel(isCalledFromRemote = false) {
     cleanupScreenAudioMix();
 
     // Если это не вызвано удаленно, уведомляем других участников о выходе
-    if (!isCalledFromRemote && socket && socket.connected) {
-        Object.keys(peerConnections).forEach(socketId => {
-            socket.emit('end-call', { to: socketId });
-        });
+    if (!isCalledFromRemote && socket && socket.connected && window.currentCallDetails?.callId) {
+        socket.emit('end-call', { callId: window.currentCallDetails.callId });
     }
 
-    // Закрываем все peer-соединения
-    Object.keys(peerConnections).forEach(socketId => {
-        const pc = peerConnections[socketId];
-        if (pc) {
-            pc.close();
-        }
-        clearPeerConnectionRuntimeState(socketId);
-        delete peerConnections[socketId];
-    });
+    if (callMediaController) {
+        callMediaController.close({ notifyServer: false }).catch((error) => {
+            console.error('Failed to close mediasoup call controller:', error);
+        });
+    }
 
     // Останавливаем все треки локального потока
     if (localStream) {

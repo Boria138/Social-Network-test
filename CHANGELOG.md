@@ -2,6 +2,18 @@
 
 Все значимые изменения в проекте собраны в этом файле.
 
+## [1.4.0] - 2026-04-03
+
+### Добавлено
+- Серверный SFU-слой звонков на `mediasoup` с worker/router/WebRTC transport signaling через Socket.IO.
+- Клиентский runtime на `mediasoup-client` для publish/consume аудио и видео потоков в существующем UI звонка.
+- Сборка browser bundle для `mediasoup-client` через `esbuild` в клиентском build-процессе.
+
+### Изменено
+- Прямые P2P звонки переведены с mesh `RTCPeerConnection` signaling на `mediasoup` transport/producers/consumers.
+- Текущие кнопки `mute`, `video` и screen share теперь управляют `mediasoup` producers, а не senders peer connection.
+- Серверный lifecycle звонка (`initiate-call`, `accept-call`, `end-call`) теперь хранит `callId` и синхронизирует участников под SFU-модель.
+
 ## [1.3.2] - 2026-03-17
 
 ### Добавлено
