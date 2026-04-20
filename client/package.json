@@ -9,6 +9,6 @@
   "license": "MIT",
   "dependencies": {
     "esbuild": "^0.28.0",
-    "mediasoup-client": "^3.18.7"
+    "mediasoup-client": "^3.19.0"
   }
 }
